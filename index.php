@@ -17,24 +17,35 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
     $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
     $limit = 30; // ilość wierszy do pobrania na raz
 
-    // Pobieramy kolumny i dane
-    $columns = [];
-    $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
-    while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
-        $columns[] = $row['Field'];
+    try {
+        // Pobieramy kolumny i dane
+        $columns = [];
+        $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
+        while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
+            $columns[] = $row['Field'];
+        }
+
+        $stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna LIMIT :offset, :limit");
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $payload = [
+            'rows' => $rows,
+            'columns' => $columns
+        ];
+
+        header('Content-Type: application/json');
+        echo json_encode($payload, JSON_THROW_ON_ERROR);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        header('Content-Type: application/json');
+        $message = $e->getMessage();
+        error_log($message);
+        echo json_encode(['error' => $message]);
     }
-
-    $stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna LIMIT :offset, :limit");
-    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-    $stmt->execute();
-
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    echo json_encode([
-        'rows' => $rows,
-        'columns' => $columns
-    ]);
     exit;
 }
 
@@ -223,8 +234,22 @@ function loadRows() {
     loading = true;
 
     fetch(`?action=fetch_rows&offset=${offset}`)
-        .then(response => response.json())
+        .then(async response => {
+            if (!response.ok) {
+                const text = await response.text();
+                console.error('Server error:', response.status, text);
+                loading = false;
+                return null;
+            }
+            return response.json();
+        })
         .then(data => {
+            if (!data) return;
+            if (data.error) {
+                console.error('Fetch error:', data.error);
+                loading = false;
+                return;
+            }
             const tableBody = document.getElementById('tableBody');
             const columns = data.columns;
             const rows = data.rows;
