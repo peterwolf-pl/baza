@@ -32,12 +32,14 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
 
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        header('Content-Type: application/json');
         echo json_encode([
             'rows' => $rows,
             'columns' => $columns
         ]);
     } catch (Exception $e) {
         http_response_code(500);
+        header('Content-Type: application/json');
         echo json_encode(['error' => $e->getMessage()]);
     }
     exit;
@@ -228,8 +230,17 @@ function loadRows() {
     loading = true;
 
     fetch(`?action=fetch_rows&offset=${offset}`)
-        .then(response => response.json())
+        .then(async response => {
+            if (!response.ok) {
+                const text = await response.text();
+                console.error('Server error:', response.status, text);
+                loading = false;
+                return null;
+            }
+            return response.json();
+        })
         .then(data => {
+            if (!data) return;
             if (data.error) {
                 console.error('Fetch error:', data.error);
                 loading = false;
