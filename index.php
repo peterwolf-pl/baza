@@ -32,15 +32,19 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
 
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        header('Content-Type: application/json');
-        echo json_encode([
+        $payload = [
             'rows' => $rows,
             'columns' => $columns
-        ]);
-    } catch (Exception $e) {
+        ];
+
+        header('Content-Type: application/json');
+        echo json_encode($payload, JSON_THROW_ON_ERROR);
+    } catch (Throwable $e) {
         http_response_code(500);
         header('Content-Type: application/json');
-        echo json_encode(['error' => $e->getMessage()]);
+        $message = $e->getMessage();
+        error_log($message);
+        echo json_encode(['error' => $message]);
     }
     exit;
 }
