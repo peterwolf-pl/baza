@@ -1,54 +1,57 @@
 <?php
 session_start();
-// Include database connection
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 if (!isset($_SESSION['user_id'])) {
-    header("Location: login.php");  // Redirect to login if not logged in
+    header("Location: login.php");
     exit;
 }
 
 include 'db.php';
 
-// Obsługa żądania AJAX do lazy loading (pobieranie wierszy)
+// AJAX: pobieranie wierszy
 if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
     $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
-    $limit = 30; // ilość wierszy do pobrania na raz
+    $limit = 30;
 
-    // Pobieramy kolumny i dane
-    $columns = [];
-    $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
-    while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
-        $columns[] = $row['Field'];
+    try {
+        // Pobierz kolumny
+        $columns = [];
+        $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
+        while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
+            $columns[] = $row['Field'];
+        }
+
+        // !!! UWAGA: w MySQL nie używaj bindValue do LIMIT/OFFSET !!!
+        $stmt = $pdo->query("SELECT * FROM karta_ewidencyjna LIMIT $offset, $limit");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        header('Content-Type: application/json');
+        echo json_encode([
+            'rows' => $rows,
+            'columns' => $columns
+        ]);
+    } catch (Exception $e) {
+        http_response_code(500);
+        header('Content-Type: application/json');
+        echo json_encode(['error' => $e->getMessage()]);
     }
-
-    $stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna LIMIT :offset, :limit");
-    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-    $stmt->execute();
-
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    echo json_encode([
-        'rows' => $rows,
-        'columns' => $columns
-    ]);
     exit;
 }
 
-// Fetch table column headers
+// Pobierz kolumny do headera
 $columns = [];
 $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
 while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
     $columns[] = $row['Field'];
 }
 
-// Fetch all lists for header links
+// Pobierz listy (do opcji i headera)
 $lists = $pdo->query("SELECT id, list_name FROM lists ORDER BY list_name")->fetchAll(PDO::FETCH_ASSOC);
 
-// Domyślne kolumny widoczne
+// Domyślne kolumny
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 ?>
 <!DOCTYPE html>
@@ -57,21 +60,19 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
     <meta charset="UTF-8">
     <title>baza.mkal.pl</title>
     <style>
-        /* Basic styling for layout */
         body { font-family: Arial, sans-serif; padding: 20px; }
         .column-selector, .data-table { margin-top: 20px; }
         .column-selector label { display: block; }
         .data-table table { border-collapse: collapse; width: 100%; }
         .data-table th, .data-table td { border: 1px solid #ddd; padding: 8px; }
         .data-table th { background-color: #f2f2f2; }
+        .header-low { float: right; margin-top: 20px; background-color: #bbb; padding: 8px 16px; border-radius: 15px; }
         .header-links { float: right; margin-top: 20px; }
-        .header-links a { margin-left: 10px; text-decoration: none; color: #007BFF; font-weight: bold; }
-        .header-links a:hover { text-decoration: underline; }
-
-        /* Collapsible styling */
+        .header-links a { margin-left: 15px; text-decoration: none; color: #fff;  }
+        .header-links a:hover { text-decoration: underline; color: #000; }
         #columnSelectorContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; }
-        #toggleButton, #toggleColumndButton { font-family: Arial, sans-serif; font-size: 4; cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        #toggleButton:focus { outline: none; font-family: Arial, sans-serif; font-size: 6;}
+        #toggleButton, #toggleColumndButton { font-family: Arial, sans-serif; font-size: 4; cursor: pointer; margin-bottom: 15px; background-color: #007BFF; color: white; border: 1px; padding: 8px 16px; border-radius: 5px; }
+        #toggleButton:focus { outline: none; font-family: Arial, sans-serif; font-size: 4;}
     </style>
 </head>
 <body>
@@ -79,21 +80,31 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
         <a href="https://baza.mkal.pl">
             <img src="bazamka.png" width="400" alt="Logo bazy Muzeum Książki Artystycznej" class="logo">
         </a>
+
         <div class="header-links">
+
+             <div>
+<a role="button" id="toggleButton" href="lists.php">Edytor list</a>
+<a role="button" href="logout.php" class="back-link" id="toggleButton">Wyloguj się</a> 
+</div>
+<div class="header-low">
+<strong>Listy:</strong>
             <?php
             foreach ($lists as $list) {
                 echo "<a href='list_view.php?list_id={$list['id']}'>{$list['list_name']}</a>";
             }
             ?>
+
+</div>
         </div>
     </div>
 
-    <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
+    <button id="toggleButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     &nbsp; &nbsp; &nbsp; &nbsp; 
-    <a role="button" href="logout.php" class="back-link" id="toggleButton">Wyloguj się</a> 
-    &nbsp; &nbsp; 
+    <a role="button" id="toggleButton" href="neww.php">Nowy Wpis</a> 
+    &nbsp; &nbsp;  &nbsp; &nbsp; 
     <a role="button" id="toggleButton" href="search.php">Szukaj</a>
-    <a role="button" id="toggleButton" href="neww.php">Nowy Wpis</a>
+   
 
     <div id="columnSelectorContainer" class="column-selector">
         <?php foreach ($columns as $col): ?>
@@ -125,13 +136,16 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
     </div>
 
 <script>
-// JavaScript to toggle the visibility of the column selector
+// przekazanie PHP -> JS dla opcji list
+const phpLists = <?php echo json_encode($lists); ?>;
+
+// Kolumny widoczne na start
+const defaultVisibleColumns = <?php echo json_encode($defaultVisibleColumns); ?>;
+
 function toggleColumnSelector() {
     const container = document.getElementById('columnSelectorContainer');
     const button = document.getElementById('toggleColumndButton');
-
     const isHidden = window.getComputedStyle(container).display === 'none';
-    
     if (isHidden) {
         container.style.display = 'block';
         button.textContent = 'Ukryj ustawienia wyświetlania';
@@ -140,25 +154,19 @@ function toggleColumnSelector() {
         button.textContent = 'Wybierz kolumny';
     }
 }
-
-
-// Function to toggle individual columns
 function toggleColumn(column) {
     let header = document.querySelector(`th.${column}`);
     let cells = document.querySelectorAll(`td.${column}`);
     let displayStyle = header.style.display === 'none' ? '' : 'none';
-
     header.style.display = displayStyle;
     cells.forEach(cell => {
         cell.style.display = displayStyle;
     });
 }
 
-// Obsługa dodawania do list
+// Dodawanie do list
 function handleListSelection(select, entryId) {
     const selectedValue = select.value;
-
-    // Funkcja wyświetlająca dynamiczny komunikat
     function showTemporaryMessage(message, type = 'success') {
         const messageContainer = document.createElement('div');
         messageContainer.textContent = message;
@@ -171,10 +179,7 @@ function handleListSelection(select, entryId) {
         messageContainer.style.backgroundColor = type === 'success' ? 'green' : 'red';
         messageContainer.style.zIndex = '1000';
         document.body.appendChild(messageContainer);
-
-        setTimeout(() => {
-            messageContainer.remove();
-        }, 1000);
+        setTimeout(() => { messageContainer.remove(); }, 1000);
     }
 
     if (selectedValue === "new") {
@@ -218,13 +223,38 @@ const limit = 20;
 let loading = false;
 let noMoreRows = false;
 
+// Generuj <option> list na podstawie phpLists
+function getListOptionsHtml() {
+    let html = `<option value="">Dodaj do listy</option>
+                <option value="new">+ Nowa lista</option>
+                <option disabled>──────────</option>`;
+    phpLists.forEach(list => {
+        html += `<option value="${list.id}">${list.list_name}</option>`;
+    });
+    return html;
+}
+
 function loadRows() {
     if (loading || noMoreRows) return;
     loading = true;
 
     fetch(`?action=fetch_rows&offset=${offset}`)
-        .then(response => response.json())
+        .then(async response => {
+            if (!response.ok) {
+                const text = await response.text();
+                console.error('Server error:', response.status, text);
+                loading = false;
+                return null;
+            }
+            return response.json();
+        })
         .then(data => {
+            if (!data) return;
+            if (data.error) {
+                console.error('Fetch error:', data.error);
+                loading = false;
+                return;
+            }
             const tableBody = document.getElementById('tableBody');
             const columns = data.columns;
             const rows = data.rows;
@@ -239,27 +269,22 @@ function loadRows() {
                 columns.forEach(col => {
                     const td = document.createElement('td');
                     td.className = col;
-                    // Sprawdź czy kolumna jest widoczna
                     const th = document.querySelector(`th.${col}`);
                     td.style.display = th && th.style.display === 'none' ? 'none' : '';
-                    td.textContent = (row[col] || '').replace(/'/g, "");
+                    // null/undefined na pusty string
+                    td.textContent = (row[col] === null || row[col] === undefined) ? '' : (row[col] + '').replace(/'/g, "");
                     tr.appendChild(td);
                 });
 
                 // Opcje
                 const tdOptions = document.createElement('td');
                 tdOptions.width = "222";
+                // użyj klucza ID lub id (wykryj automatycznie)
+                const idField = row['ID'] !== undefined ? 'ID' : (row['id'] !== undefined ? 'id' : columns[0]);
                 tdOptions.innerHTML = `
-                    <a role="button" id="toggleButton" href="karta.php?id=${row['ID']}">Karta</a>
-                    <select onchange="handleListSelection(this, ${row['ID']})">
-                        <option value="">Dodaj do listy</option>
-                        <option value="new">+ Nowa lista</option>
-                        <option disabled>──────────</option>
-                        <?php
-                        foreach ($lists as $list) {
-                            echo "<option value='{$list['id']}'>{$list['list_name']}</option>";
-                        }
-                        ?>
+                    <a role="button" id="toggleButton" href="karta.php?id=${row[idField]}">Karta</a>
+                    <select onchange="handleListSelection(this, ${row[idField]})">
+                        ${getListOptionsHtml()}
                     </select>
                 `;
                 tr.appendChild(tdOptions);
@@ -276,13 +301,13 @@ function loadRows() {
         });
 }
 
-// Ładowanie początkowych danych
+// Ładowanie początkowe
 loadRows();
 
 // Nasłuchiwanie przewijania
 window.addEventListener('scroll', function() {
     const scrollPosition = window.innerHeight + window.scrollY;
-    const threshold = 100; // odległość od dołu w px przy której ładujemy kolejne
+    const threshold = 100;
     if (scrollPosition >= document.body.offsetHeight - threshold && !loading && !noMoreRows) {
         loadRows();
     }
