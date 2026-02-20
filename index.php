@@ -51,8 +51,11 @@ while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
 // Pobierz listy (do opcji i headera)
 $lists = $pdo->query("SELECT id, list_name FROM lists ORDER BY list_name")->fetchAll(PDO::FETCH_ASSOC);
 
-// Domyślne kolumny
+// Domyślne kolumny (wspólne ustawienie między podstronami)
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
+$selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
+    ? array_values(array_intersect($columns, $_SESSION['visible_columns']))
+    : $defaultVisibleColumns;
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -111,7 +114,7 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
             <label>
                 <input type="checkbox" class="column-checkbox" value="<?php echo $col; ?>" 
                        onclick="toggleColumn('<?php echo $col; ?>')" 
-                       <?php echo in_array($col, $defaultVisibleColumns) ? 'checked' : ''; ?>>
+                       <?php echo in_array($col, $selectedColumns) ? 'checked' : ''; ?>>
                 <?php echo $col; ?>
             </label>
         <?php endforeach; ?>
@@ -123,7 +126,7 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
                 <tr>
                     <?php foreach ($columns as $col): ?>
                         <th class="<?php echo $col; ?>" 
-                            style="display: <?php echo in_array($col, $defaultVisibleColumns) ? '' : 'none'; ?>;">
+                            style="display: <?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>;">
                             <?php echo $col; ?>
                         </th>
                     <?php endforeach; ?>
@@ -140,7 +143,7 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 const phpLists = <?php echo json_encode($lists); ?>;
 
 // Kolumny widoczne na start
-const defaultVisibleColumns = <?php echo json_encode($defaultVisibleColumns); ?>;
+const defaultVisibleColumns = <?php echo json_encode($selectedColumns); ?>;
 
 function toggleColumnSelector() {
     const container = document.getElementById('columnSelectorContainer');

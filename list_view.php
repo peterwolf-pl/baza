@@ -30,10 +30,14 @@ $lists = $pdo->query("SELECT id, list_name FROM lists ORDER BY list_name")->fetc
 // Domyślne widoczne kolumny
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 
-// Przechwytywanie wyboru kolumn przez POST lub domyślne
-$selectedColumns = $defaultVisibleColumns;
+// Przechwytywanie wyboru kolumn przez POST lub sesję (wspólne między podstronami)
+$selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
+    ? array_values(array_intersect($columns, $_SESSION['visible_columns']))
+    : $defaultVisibleColumns;
+
 if (isset($_POST['visible_columns']) && is_array($_POST['visible_columns'])) {
     $selectedColumns = array_values(array_intersect($columns, $_POST['visible_columns']));
+    $_SESSION['visible_columns'] = $selectedColumns;
 }
 
 // Pobierz wpisy z danej listy
