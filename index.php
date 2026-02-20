@@ -56,6 +56,42 @@ if (!isset($collections[$selectedCollection])) {
 }
 $mainTable = $collections[$selectedCollection]['main'];
 
+
+function buildImagePaths(?string $rawImageValue, string $collection): array {
+    if ($rawImageValue === null) {
+        return [null, null];
+    }
+
+    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
+    if ($normalizedImageValue === '') {
+        return [null, null];
+    }
+
+    if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
+        return [$normalizedImageValue, null];
+    }
+
+    $relativeImagePath = ltrim($normalizedImageValue, '/');
+    $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
+
+    if (empty($encodedSegments)) {
+        return [null, null];
+    }
+
+    $encodedPath = implode('/', $encodedSegments);
+    if ($collection === 'ksiazki-artystyczne') {
+        return [
+            'https://mkalodz.pl/bazagfx/' . $encodedPath,
+            'https://baza.mkal.pl/gfx/' . $encodedPath,
+        ];
+    }
+
+    return [
+        'https://baza.mkal.pl/gfx/' . $encodedPath,
+        'https://mkalodz.pl/bazagfx/' . $encodedPath,
+    ];
+}
+
 // AJAX: pobieranie wierszy
 if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
     $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
@@ -90,6 +126,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
         $stmt = $pdo->query($selectSql);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        foreach ($rows as &$row) {
+            $thumbnailPaths = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection);
+            $row['__thumbnail_url'] = $thumbnailPaths[0];
+            $row['__thumbnail_fallback_url'] = $thumbnailPaths[1];
+        }
+        unset($row);
+
         header('Content-Type: application/json');
         echo json_encode([
             'rows' => $rows,
@@ -118,6 +161,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
     $rawInput = file_get_contents('php://input');
     $data = json_decode($rawInput, true);
     $requested = (isset($data['visible_columns']) && is_array($data['visible_columns'])) ? $data['visible_columns'] : [];
+    $showThumbnailColumn = isset($data['show_thumbnail_column']) ? (bool)$data['show_thumbnail_column'] : true;
+    $thumbnailSize = isset($data['thumbnail_size']) ? (int)$data['thumbnail_size'] : 90;
+    $thumbnailSize = max(25, min(111, $thumbnailSize));
 
     $columns = [];
     $query = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
@@ -127,6 +173,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
 
     $selectedColumns = array_values(array_intersect($columns, $requested));
     $_SESSION['visible_columns'] = $selectedColumns;
+    $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
+    $_SESSION['thumbnail_size'] = $thumbnailSize;
 
     echo json_encode(['success' => true]);
     exit;
@@ -149,6 +197,8 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
     ? array_values(array_intersect($columns, $_SESSION['visible_columns']))
     : $defaultVisibleColumns;
+$showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -156,6 +206,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
     <meta charset="UTF-8">
     <title>baza.mkal.pl</title>
         <link rel="stylesheet" href="styles.css">
+    <style>:root { --thumbnail-height: <?php echo (int)$thumbnailSize; ?>px; }</style>
 </head>
 <body>
     <div class="header">
@@ -201,6 +252,15 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
    
  </div>
     <div id="columnSelectorContainer" class="column-selector">
+        <label class="thumbnail-size-control" for="thumbnailSizeSlider">
+            Rozmiar miniatury
+            <input type="range" id="thumbnailSizeSlider" min="25" max="111" value="<?php echo (int)$thumbnailSize; ?>" oninput="updateThumbnailSize(this.value)">
+            <span id="thumbnailSizeValue"><?php echo (int)$thumbnailSize; ?>px</span>
+        </label>
+        <label>
+            <input type="checkbox" id="thumbnailColumnCheckbox" onclick="toggleThumbnailColumn()" <?php echo $showThumbnailColumn ? 'checked' : ''; ?>>
+            Miniatura foto
+        </label>
         <?php foreach ($columns as $col): ?>
             <label>
                 <input type="checkbox" class="column-checkbox" value="<?php echo $col; ?>" 
@@ -215,6 +275,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
         <table id="dataTable">
             <thead>
                 <tr>
+                    <th id="thumbnailHeader" class="thumbnail-col" style="display: <?php echo $showThumbnailColumn ? "" : "none"; ?>;">Miniatura foto</th>
                     <?php foreach ($columns as $col): ?>
                         <th class="<?php echo $col; ?>" 
                             style="display: <?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>;">
@@ -238,6 +299,8 @@ const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
 // Kolumny widoczne na start
 const defaultVisibleColumns = <?php echo json_encode($selectedColumns); ?>;
+let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
+let thumbnailSizePx = <?php echo (int)$thumbnailSize; ?>;
 let saveColumnsTimeout = null;
 
 function toggleColumnSelector() {
@@ -261,8 +324,38 @@ function persistVisibleColumns() {
     fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=save_visible_columns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visible_columns: visibleColumns })
+        body: JSON.stringify({ visible_columns: visibleColumns, show_thumbnail_column: showThumbnailColumn, thumbnail_size: thumbnailSizePx })
     }).catch(err => console.error('Błąd zapisu kolumn:', err));
+}
+
+function updateThumbnailSize(size) {
+    thumbnailSizePx = Math.max(25, Math.min(111, Number(size) || 90));
+    document.documentElement.style.setProperty('--thumbnail-height', thumbnailSizePx + 'px');
+
+    const slider = document.getElementById('thumbnailSizeSlider');
+    const value = document.getElementById('thumbnailSizeValue');
+    if (slider) slider.value = String(thumbnailSizePx);
+    if (value) value.textContent = thumbnailSizePx + 'px';
+
+    if (saveColumnsTimeout) clearTimeout(saveColumnsTimeout);
+    saveColumnsTimeout = setTimeout(persistVisibleColumns, 150);
+}
+
+function toggleThumbnailColumn() {
+    const checkbox = document.getElementById('thumbnailColumnCheckbox');
+    showThumbnailColumn = checkbox ? checkbox.checked : true;
+
+    const thumbnailHeader = document.getElementById('thumbnailHeader');
+    if (thumbnailHeader) {
+        thumbnailHeader.style.display = showThumbnailColumn ? '' : 'none';
+    }
+
+    document.querySelectorAll('td.thumbnail-col').forEach(cell => {
+        cell.style.display = showThumbnailColumn ? '' : 'none';
+    });
+
+    if (saveColumnsTimeout) clearTimeout(saveColumnsTimeout);
+    saveColumnsTimeout = setTimeout(persistVisibleColumns, 150);
 }
 
 function toggleColumn(column) {
@@ -415,6 +508,28 @@ function loadRows() {
 
             rows.forEach(row => {
                 const tr = document.createElement('tr');
+
+                const tdThumbnail = document.createElement('td');
+                tdThumbnail.classList.add('entry-thumbnail-cell', 'thumbnail-col');
+                tdThumbnail.style.display = showThumbnailColumn ? '' : 'none';
+                if (row.__thumbnail_url) {
+                    const img = document.createElement('img');
+                    img.classList.add('entry-thumbnail');
+                    img.alt = 'Miniatura wpisu';
+                    img.src = row.__thumbnail_url;
+                    if (row.__thumbnail_fallback_url) {
+                        img.onerror = () => {
+                            if (img.src !== row.__thumbnail_fallback_url) {
+                                img.src = row.__thumbnail_fallback_url;
+                            }
+                        };
+                    }
+                    tdThumbnail.appendChild(img);
+                } else {
+                    tdThumbnail.textContent = '—';
+                }
+                tr.appendChild(tdThumbnail);
+
                 columns.forEach(col => {
                     const td = document.createElement('td');
                     td.className = col;
@@ -453,6 +568,9 @@ function loadRows() {
             loading = false;
         });
 }
+
+toggleThumbnailColumn();
+updateThumbnailSize(thumbnailSizePx);
 
 // Ładowanie początkowe
 loadRows();

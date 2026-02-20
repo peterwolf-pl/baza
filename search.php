@@ -43,6 +43,17 @@ $search_results = [];
 $query_string = '';
 $has_search = false;
 $search_state_id = '';
+$showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
+
+if (isset($_POST['show_thumbnail_column'])) {
+    $showThumbnailColumn = $_POST['show_thumbnail_column'] === '1';
+    $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
+}
+if (isset($_POST['thumbnail_size'])) {
+    $thumbnailSize = max(25, min(111, (int)$_POST['thumbnail_size']));
+    $_SESSION['thumbnail_size'] = $thumbnailSize;
+}
 
 // Przechwytywanie wyboru kolumn
 $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
@@ -79,6 +90,41 @@ function normalizeSearchQuery($text) {
     $t = preg_replace('/\s+/', ' ', $t);
     return trim($t);
 }
+
+function buildImagePaths(?string $rawImageValue, string $collection): array {
+    if ($rawImageValue === null) {
+        return [null, null];
+    }
+
+    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
+    if ($normalizedImageValue === '') {
+        return [null, null];
+    }
+
+    if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
+        return [$normalizedImageValue, null];
+    }
+
+    $relativeImagePath = ltrim($normalizedImageValue, '/');
+    $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
+
+    if (empty($encodedSegments)) {
+        return [null, null];
+    }
+
+    $encodedPath = implode('/', $encodedSegments);
+    if ($collection === 'ksiazki-artystyczne') {
+        return [
+            'https://mkalodz.pl/bazagfx/' . $encodedPath,
+            'https://baza.mkal.pl/gfx/' . $encodedPath,
+        ];
+    }
+
+    return [
+        'https://baza.mkal.pl/gfx/' . $encodedPath,
+        'https://mkalodz.pl/bazagfx/' . $encodedPath,
+    ];
+}
 function sqlFoldExpr($field) {
     $expr = "LOWER(CAST($field AS CHAR))";
     $map = [
@@ -103,6 +149,12 @@ if (isset($_GET['state'])) {
         $state_columns = is_array($state['selected_columns'] ?? null) ? $state['selected_columns'] : [];
         if (!empty($state_columns)) {
             $selectedColumns = array_values(array_intersect($columns, $state_columns));
+        }
+        if (array_key_exists('show_thumbnail_column', $state)) {
+            $showThumbnailColumn = (bool)$state['show_thumbnail_column'];
+        }
+        if (array_key_exists('thumbnail_size', $state)) {
+            $thumbnailSize = max(25, min(111, (int)$state['thumbnail_size']));
         }
         $has_search = true;
     }
@@ -145,6 +197,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
         'query_string' => $query_string,
         'search_results' => $search_results,
         'selected_columns' => $selectedColumns,
+        'show_thumbnail_column' => $showThumbnailColumn,
+        'thumbnail_size' => $thumbnailSize,
         'created_at' => time()
     ];
     if (count($_SESSION['search_states']) > 20) {
@@ -164,9 +218,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     <meta charset="UTF-8">
     <title>Wyniki wyszukiwania | baza.mkal.pl</title>
         <link rel="stylesheet" href="styles.css">
+    <style>:root { --thumbnail-height: <?php echo (int)$thumbnailSize; ?>px; }</style>
     <script>
         // kolumny widoczności
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
+        let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
+        let thumbnailSizePx = <?php echo (int)$thumbnailSize; ?>;
         const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
         // globalny zbiór zaznaczeń z obu tabel
@@ -186,6 +243,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
             updateColumnDisplay();
         }
         function updateColumnDisplay() {
+            document.querySelectorAll('th.thumbnail-col, td.thumbnail-col').forEach(el => {
+                el.style.display = showThumbnailColumn ? '' : 'none';
+            });
             document.querySelectorAll('th.data-col').forEach(th => {
                 th.style.display = visibleColumns.includes(th.dataset.col) ? '' : 'none';
             });
@@ -193,7 +253,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                 td.style.display = visibleColumns.includes(td.dataset.col) ? '' : 'none';
             });
         }
-        window.addEventListener('DOMContentLoaded', updateColumnDisplay);
+
+        function updateThumbnailSize(size) {
+            thumbnailSizePx = Math.max(25, Math.min(111, Number(size) || 90));
+            document.documentElement.style.setProperty('--thumbnail-height', thumbnailSizePx + 'px');
+
+            const slider = document.getElementById('thumbnailSizeSlider');
+            const value = document.getElementById('thumbnailSizeValue');
+            if (slider) slider.value = String(thumbnailSizePx);
+            if (value) value.textContent = thumbnailSizePx + 'px';
+            const hidden = document.getElementById('thumbnailSizeHidden');
+            if (hidden) hidden.value = String(thumbnailSizePx);
+        }
+        window.addEventListener('DOMContentLoaded', () => {
+            updateColumnDisplay();
+            updateThumbnailSize(thumbnailSizePx);
+        });
 
         function toast(msg, type='success'){
             const el = document.createElement('div');
@@ -427,6 +502,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     <form id="columnSelectorContainer" class="column-selector" method="post" action="" onsubmit="suppressUnloadWarning = true;">
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
+        <input type="hidden" name="show_thumbnail_column" value="0">
+        <label>
+            <input type="checkbox" name="show_thumbnail_column" value="1" onclick="showThumbnailColumn=this.checked;updateColumnDisplay();" <?php echo $showThumbnailColumn ? 'checked' : ''; ?>>
+            Miniatura foto
+        </label>
         <?php foreach ($columns as $col): ?>
             <label>
                 <input type="checkbox" name="visible_columns[]" value="<?php echo $col; ?>"
@@ -443,11 +523,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     <h2>Wyszukiwanie</h2>
     <form method="post" onsubmit="suppressUnloadWarning = true;">
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
+        <input type="hidden" name="show_thumbnail_column" value="<?php echo $showThumbnailColumn ? '1' : '0'; ?>">
+        <input type="hidden" name="thumbnail_size" value="<?php echo (int)$thumbnailSize; ?>" id="thumbnailSizeHidden">
         <input type="text" name="query" value="<?php echo htmlspecialchars($query_string); ?>" required>
         <?php foreach ($selectedColumns as $col): ?>
             <input type="hidden" name="visible_columns[]" value="<?php echo $col; ?>">
         <?php endforeach; ?>
         <button type="submit">Szukaj</button>
+        <label class="thumbnail-size-control" for="thumbnailSizeSlider">
+            <input type="range" id="thumbnailSizeSlider" min="25" max="111" value="<?php echo (int)$thumbnailSize; ?>" oninput="updateThumbnailSize(this.value)">
+            <span id="thumbnailSizeValue"><?php echo (int)$thumbnailSize; ?>px</span>
+        </label>
     </form>
              <div class="footer-right">
         Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
@@ -463,6 +549,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                             <th style="width:36px;">
                                 <input type="checkbox" class="select-all" onclick="selectAllInTable(this, '#tableExact')">
                             </th>
+                            <th class="thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">Miniatura foto</th>
                             <?php foreach ($columns as $col): ?>
                                 <th class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">
                                     <?php echo htmlspecialchars($col); ?>
@@ -480,6 +567,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                             <tr>
                                 <td>
                                     <input type="checkbox" class="row-select" data-entry-id="<?php echo (int)$entryId; ?>" onclick="toggleRowSelection(this)">
+                                </td>
+                                <td class="entry-thumbnail-cell thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">
+                                    <?php [$thumbnailUrl, $thumbnailFallbackUrl] = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection); ?>
+                                    <?php if ($thumbnailUrl !== null): ?>
+                                        <img class="entry-thumbnail" src="<?php echo htmlspecialchars($thumbnailUrl); ?>" alt="Miniatura wpisu"<?php if ($thumbnailFallbackUrl !== null): ?> onerror="if (this.src !== <?php echo json_encode($thumbnailFallbackUrl); ?>) this.src = <?php echo json_encode($thumbnailFallbackUrl); ?>;"<?php endif; ?>>
+                                    <?php else: ?>
+                                        <span>—</span>
+                                    <?php endif; ?>
                                 </td>
                                 <?php foreach ($columns as $col): ?>
                                     <td class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">

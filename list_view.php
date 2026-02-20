@@ -75,6 +75,41 @@ function getNextPrzemieszczenieNumber(PDO $pdo, string $movesTable): string {
     return (string)$stmt->fetchColumn();
 }
 
+function buildImagePaths(?string $rawImageValue, string $collection): array {
+    if ($rawImageValue === null) {
+        return [null, null];
+    }
+
+    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
+    if ($normalizedImageValue === '') {
+        return [null, null];
+    }
+
+    if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
+        return [$normalizedImageValue, null];
+    }
+
+    $relativeImagePath = ltrim($normalizedImageValue, '/');
+    $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
+
+    if (empty($encodedSegments)) {
+        return [null, null];
+    }
+
+    $encodedPath = implode('/', $encodedSegments);
+    if ($collection === 'ksiazki-artystyczne') {
+        return [
+            'https://mkalodz.pl/bazagfx/' . $encodedPath,
+            'https://baza.mkal.pl/gfx/' . $encodedPath,
+        ];
+    }
+
+    return [
+        'https://baza.mkal.pl/gfx/' . $encodedPath,
+        'https://mkalodz.pl/bazagfx/' . $encodedPath,
+    ];
+}
+
 $bulkMoveSuccess = null;
 $bulkMoveError = null;
 
@@ -156,6 +191,17 @@ $lists = $listsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Domyślne widoczne kolumny
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
+$showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
+
+if (isset($_POST['show_thumbnail_column'])) {
+    $showThumbnailColumn = $_POST['show_thumbnail_column'] === '1';
+    $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
+}
+if (isset($_POST['thumbnail_size'])) {
+    $thumbnailSize = max(25, min(111, (int)$_POST['thumbnail_size']));
+    $_SESSION['thumbnail_size'] = $thumbnailSize;
+}
 
 // Przechwytywanie wyboru kolumn przez POST lub sesję (wspólne między podstronami)
 $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
@@ -242,9 +288,11 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
     <meta charset="UTF-8">
     <title>baza.mkal.pl - Lista: <?php echo htmlspecialchars($list['list_name']); ?></title>
         <link rel="stylesheet" href="styles.css">
+    <style>:root { --thumbnail-height: <?php echo (int)$thumbnailSize; ?>px; }</style>
     <script>
         // przekazujemy wybrane kolumny do JS
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
+        let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
         const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
         function toggleColumnSelector() {
@@ -268,6 +316,9 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
         }
 
         function updateColumnDisplay() {
+            document.querySelectorAll('th.thumbnail-col, td.thumbnail-col').forEach(el => {
+                el.style.display = showThumbnailColumn ? '' : 'none';
+            });
             document.querySelectorAll('th.data-col').forEach(th => {
                 th.style.display = visibleColumns.includes(th.dataset.col) ? '' : 'none';
             });
@@ -405,6 +456,12 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
    
     <form id="columnSelectorContainer" class="column-selector" method="post" action="">
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
+        <input type="hidden" name="thumbnail_size" value="<?php echo (int)$thumbnailSize; ?>">
+        <input type="hidden" name="show_thumbnail_column" value="0">
+        <label>
+            <input type="checkbox" name="show_thumbnail_column" value="1" onclick="showThumbnailColumn=this.checked;updateColumnDisplay();" <?php echo $showThumbnailColumn ? 'checked' : ''; ?>>
+            Miniatura foto
+        </label>
         <?php foreach ($columns as $col): ?>
             <label>
                 <input type="checkbox" name="visible_columns[]" value="<?php echo $col; ?>"
@@ -421,6 +478,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
             <table>
                 <thead>
                     <tr>
+                        <th class="thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">Miniatura foto</th>
                         <?php foreach ($columns as $col): ?>
                             <th class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">
                                 <?php echo htmlspecialchars($col); ?>
@@ -432,6 +490,14 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
                 <tbody>
                     <?php foreach ($entries as $row): ?>
                         <tr>
+                            <td class="entry-thumbnail-cell thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">
+                                <?php [$thumbnailUrl, $thumbnailFallbackUrl] = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection); ?>
+                                <?php if ($thumbnailUrl !== null): ?>
+                                    <img class="entry-thumbnail" src="<?php echo htmlspecialchars($thumbnailUrl); ?>" alt="Miniatura wpisu"<?php if ($thumbnailFallbackUrl !== null): ?> onerror="if (this.src !== <?php echo json_encode($thumbnailFallbackUrl); ?>) this.src = <?php echo json_encode($thumbnailFallbackUrl); ?>;"<?php endif; ?>>
+                                <?php else: ?>
+                                    <span>—</span>
+                                <?php endif; ?>
+                            </td>
                             <?php foreach ($columns as $col): ?>
                                 <td class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">
                                     <?php echo htmlspecialchars($row[$col] ?? ''); ?>

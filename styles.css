@@ -332,6 +332,18 @@ th,
     white-space: nowrap;
 }
 
+.entry-thumbnail-cell {
+    width: 120px;
+}
+
+.entry-thumbnail {
+    height: 90px;
+    width: auto;
+    max-width: 120px;
+    object-fit: contain;
+    display: block;
+}
+
 .highlight {
     font-weight: bold;
     background: red;
@@ -403,4 +415,20 @@ th,
 
 .footer-right a:hover {
     text-decoration: underline;
+}
+
+
+.thumbnail-size-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 10px;
+}
+
+#thumbnailSizeSlider {
+    width: 125px;
+}
+
+.entry-thumbnail {
+    height: var(--thumbnail-height, 90px);
 }
