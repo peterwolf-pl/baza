@@ -111,23 +111,7 @@ if (isset($_GET['id'])) {
 <head>
     <meta charset="UTF-8">
     <title>View Record</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px; display: flex; gap: 20px; }
-        .details { width: 50%; }
-        .image-container { width: 700px; padding-top: 150px;}
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .back-link { margin-top: 20px; display: inline-block; }
-        #przemieszczeniaContainer { display: none; padding-top: 10px; }
-        #togglePrzemieszczeniaButton { cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        #togglePrzemieszczeniaButton:focus { outline: none; }
-         #toggleButton { cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        #toggleButton:focus { outline: none; }
-        .add-form, .edit-form { margin-top: 20px; }
-        .add-form input, .add-form textarea, .edit-form input, .edit-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; }
-        .image-container img { max-width: 100%; height: auto; }
-    </style>
+        <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 

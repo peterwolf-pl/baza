@@ -62,17 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_karta'])) {
 <head>
     <meta charset="UTF-8">
     <title>Dodaj Nową Kartę Ewidencyjną</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px;}
-        table { width: 80%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .add-form { margin-top: 20px; max-width: 600px; }
-        .add-form label { font-weight: bold; display: block; margin-top: 10px; }
-        .add-form input, .add-form textarea { width: 100%; padding: 8px; margin-top: 5px; margin-bottom: 15px; }
-        .add-form input[type="submit"] { background-color: #007BFF; color: white; border: none; padding: 10px 20px; cursor: pointer; border-radius: 5px; }
-        .add-form input[type="submit"]:hover { background-color: #0056b3; }
-    </style>
+        <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="header">

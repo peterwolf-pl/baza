@@ -193,23 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
 <head>
     <meta charset="UTF-8">
     <title>Wyniki wyszukiwania | baza.mkal.pl</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px; }
-        .header { display: flex; align-items: center; gap: 16px; }
-        .header-links { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-        .header-links a { text-decoration: none; color: #007BFF; font-weight: bold; }
-        .header-links a:hover { text-decoration: underline; }
-        .bulk-bar { display: inline-flex; align-items: center; gap: 8px; }
-        .data-table table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        .data-table th, .data-table td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
-        .data-table th { background-color: #f2f2f2; }
-        #columnSelectorContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-bottom: 20px; }
-        #toggleColumndButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        .highlight { background: yellow; font-weight: bold; }
-        .fuzzy-highlight { background: #bfffbf; font-weight: bold; }
-        .no-highlight { user-select: text; white-space: nowrap; }
-        .muted { color: #666; font-size: 12px; }
-    </style>
+        <link rel="stylesheet" href="styles.css">
     <script>
         // kolumny widoczności
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;

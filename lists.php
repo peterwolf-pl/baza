@@ -63,16 +63,7 @@ if (isset($_GET['edit']) && ctype_digit($_GET['edit'])) {
 <head>
     <meta charset="UTF-8">
     <title>Zarządzanie listami | baza.mkal.pl</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px; }
-        .lists-table, .entries-table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
-        th, td { border: 1px solid #ccc; padding: 8px; }
-        th { background: #f4f4f4; }
-        .edit-btn, .delete-btn, .remove-btn { background: #007BFF; color: white; border: none; padding: 4px 8px; cursor: pointer; border-radius: 4px; margin-right: 4px;}
-        .delete-btn, .remove-btn { background: #dc3545; }
-        .back-link { display: inline-block; margin-bottom: 18px; }
-        .form-inline { display: inline; }
-    </style>
+        <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <a href="https://baza.mkal.pl" class="back-link">Powrót do strony głównej</a>

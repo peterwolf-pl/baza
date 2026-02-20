@@ -207,34 +207,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
 <head>
     <meta charset="UTF-8">
     <title>Karta Ewidencyjna kolekcji MKA</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px;}
-        table { width: 80%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .image-container img { max-width: 80%; height: auto; }
-        button { cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        button:focus { outline: none; }
-        .footer-right { position: fixed; bottom: 10px; right: 5%; font-size: 10px; font-family: Arial, sans-serif; }
-        .footer-right a { color: #007bff; text-decoration: none; }
-        .footer-right a:hover { text-decoration: underline; }
-        #editKartaContainer, #logContainer, #przemieszczeniaContainer { display: none; padding-top: 10px; }
-
- h1, h2, h3 {font-family: GrohmanGrotesk;
-                    src: url("/gg.woff2") format('woff2');}
-                    .back-link { margin-top: 20px; display: inline-block; }
-        #przemieszczeniaContainer { display: none; padding-top: 10px; }
-        #togglePrzemieszczeniaButton { cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        #togglePrzemieszczeniaButton:focus { outline: none; }
-         #toggleButton { cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        #toggleButton:focus { outline: none; }
-        .add-form, .edit-form { margin-top: 20px; }
-        .add-form input, .add-form textarea, .edit-form input, .edit-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; }
-        .message-success { color: #0a7d1a; font-weight: bold; margin-top: 10px; }
-        .message-error { color: #c40000; font-weight: bold; margin-top: 10px; }
-
-
-    </style>
+        <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="header">
