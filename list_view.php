@@ -139,6 +139,54 @@ if (!$list) {
     exit;
 }
 
+$entryIdsForList = array_values(array_unique(array_map(
+    static fn(array $entry): int => (int)($entry['ID'] ?? $entry['id'] ?? 0),
+    $entries
+)));
+$entryIdsForList = array_values(array_filter($entryIdsForList, static fn(int $id): bool => $id > 0));
+
+$commonPrzemieszczenia = [];
+if (!empty($entryIdsForList)) {
+    $placeholders = implode(',', array_fill(0, count($entryIdsForList), '?'));
+
+    if ($hasMoveUsernameColumn) {
+        $commonMovesSql = "
+            SELECT
+                data_przemieszczenia,
+                data_zwrotu,
+                numer_przemieszczenia,
+                miejsce_przemieszczenia,
+                powod_cel_przemieszczenia,
+                user_username,
+                COUNT(DISTINCT karta_id) AS karta_count
+            FROM karta_ewidencyjna_przemieszczenia
+            WHERE karta_id IN ($placeholders)
+            GROUP BY data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia, user_username
+            HAVING karta_count = ?
+            ORDER BY CAST(numer_przemieszczenia AS UNSIGNED) DESC, data_przemieszczenia DESC
+        ";
+    } else {
+        $commonMovesSql = "
+            SELECT
+                data_przemieszczenia,
+                data_zwrotu,
+                numer_przemieszczenia,
+                miejsce_przemieszczenia,
+                powod_cel_przemieszczenia,
+                COUNT(DISTINCT karta_id) AS karta_count
+            FROM karta_ewidencyjna_przemieszczenia
+            WHERE karta_id IN ($placeholders)
+            GROUP BY data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia
+            HAVING karta_count = ?
+            ORDER BY CAST(numer_przemieszczenia AS UNSIGNED) DESC, data_przemieszczenia DESC
+        ";
+    }
+
+    $commonMovesStmt = $pdo->prepare($commonMovesSql);
+    $commonMovesStmt->execute(array_merge($entryIdsForList, [count($entryIdsForList)]));
+    $commonPrzemieszczenia = $commonMovesStmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
 $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
 ?>
 <!DOCTYPE html>
@@ -163,7 +211,10 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
         th.data-col, td.data-col { /* sterowane JSem przez display */ }
         #bulkPrzemieszczenieContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-top: 15px; }
         #toggleBulkPrzemieszczenieButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-top: 15px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
+        #toggleCommonPrzemieszczeniaButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-top: 15px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
+        .bulk-actions { display: flex; gap: 10px; flex-wrap: wrap; }
         .bulk-form input, .bulk-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+        #commonPrzemieszczeniaContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-top: 15px; }
         .message-success { color: #0a7d1a; font-weight: bold; margin-top: 10px; }
         .message-error { color: #c40000; font-weight: bold; margin-top: 10px; }
     </style>
@@ -210,6 +261,19 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
             } else {
                 container.style.display = 'none';
                 button.textContent = 'Dodaj przemieszczenie całej listy';
+            }
+        }
+
+        function toggleCommonPrzemieszczenia() {
+            const container = document.getElementById('commonPrzemieszczeniaContainer');
+            const button = document.getElementById('toggleCommonPrzemieszczeniaButton');
+            const isHidden = window.getComputedStyle(container).display === 'none';
+            if (isHidden) {
+                container.style.display = 'block';
+                button.textContent = 'Ukryj wspólne przemieszczenia listy';
+            } else {
+                container.style.display = 'none';
+                button.textContent = 'Wspólne przemieszczenia listy';
             }
         }
 
@@ -362,7 +426,10 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
                 </tbody>
             </table>
 
-            <button id="toggleBulkPrzemieszczenieButton" type="button" onclick="toggleBulkPrzemieszczenieForm()">Dodaj przemieszczenie całej listy</button>
+            <div class="bulk-actions">
+                <button id="toggleBulkPrzemieszczenieButton" type="button" onclick="toggleBulkPrzemieszczenieForm()">Dodaj przemieszczenie całej listy</button>
+                <button id="toggleCommonPrzemieszczeniaButton" type="button" onclick="toggleCommonPrzemieszczenia()">Wspólne przemieszczenia listy</button>
+            </div>
             <div id="bulkPrzemieszczenieContainer">
                 <h3>Nowe przemieszczenie dla całej listy</h3>
                 <form method="post" class="bulk-form">
@@ -385,6 +452,42 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
 
                     <button type="submit">Dodaj</button>
                 </form>
+            </div>
+
+            <div id="commonPrzemieszczeniaContainer">
+                <h3>Wspólne przemieszczenia dla pozycji z tej listy</h3>
+                <?php if (!empty($commonPrzemieszczenia)): ?>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Data Przemieszczenia</th>
+                                <th>Data Zwrotu</th>
+                                <th>Numer Przemieszczenia</th>
+                                <th>Miejsce Przemieszczenia</th>
+                                <th>Powód/Cel Przemieszczenia</th>
+                                <?php if ($hasMoveUsernameColumn): ?>
+                                    <th>Użytkownik</th>
+                                <?php endif; ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($commonPrzemieszczenia as $przemieszczenie): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['data_przemieszczenia'] ?? ''); ?></td>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['data_zwrotu'] ?? ''); ?></td>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['numer_przemieszczenia'] ?? ''); ?></td>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['miejsce_przemieszczenia'] ?? ''); ?></td>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['powod_cel_przemieszczenia'] ?? ''); ?></td>
+                                    <?php if ($hasMoveUsernameColumn): ?>
+                                        <td><?php echo htmlspecialchars($przemieszczenie['user_username'] ?? ''); ?></td>
+                                    <?php endif; ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php else: ?>
+                    <p>Brak wspólnych przemieszczeń dla wszystkich pozycji na tej liście.</p>
+                <?php endif; ?>
             </div>
         <?php else: ?>
             <p>Brak wpisów na tej liście.</p>
