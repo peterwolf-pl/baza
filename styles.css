@@ -59,6 +59,7 @@ h3 {
     margin-left: 15px;
     text-decoration: none;
     color: #fff;
+
 }
 
 .header .header-links a {
@@ -110,7 +111,7 @@ button,
 #toggleCommonPrzemieszczeniaButton {
     font-family: var(--font-base);
     padding: 5px 11px;
-    margin-bottom: 10px;
+    margin-bottom: 5px;
 }
 
 #toggleButton,
@@ -129,7 +130,7 @@ button,
 #toggleCommonPrzemieszczeniaButton {
     margin-top: 15px;
     padding: 4px 6px;
-    font-size: 16px;
+    font-size: 12px;
 }
 
 button:focus,
@@ -138,6 +139,7 @@ button:focus,
 #toggleColumnButton:focus,
 #togglePrzemieszczeniaButton:focus {
     outline: none;
+    
 }
 
 .edit-btn,
@@ -184,14 +186,14 @@ button:focus,
 .add-form input,
 .add-form textarea {
     margin-top: 5px;
-    margin-bottom: 15px;
+    margin-bottom: 10px;
 }
 
 .add-form input[type='submit'] {
     border: none;
     color: #fff;
     cursor: pointer;
-    padding: 10px 20px;
+    padding: 10px 10px;
     border-radius: var(--radius-md);
     background-color: var(--color-primary);
 }
@@ -236,12 +238,12 @@ table,
 table,
 .lists-table,
 .entries-table {
-    margin-top: 20px;
+    margin-top: 10px;
 }
 
 .lists-table,
 .entries-table {
-    margin-bottom: 30px;
+    margin-bottom: 10px;
 }
 
 th,
@@ -296,7 +298,7 @@ th,
 
 .highlight {
     font-weight: bold;
-    background: yellow;
+    background: red;
 }
 
 .fuzzy-highlight {
@@ -325,7 +327,7 @@ th,
 
 .back-link {
     display: inline-block;
-    margin-top: 20px;
+    margin-top: 10px;
     margin-bottom: 18px;
 }
 
@@ -354,7 +356,7 @@ th,
     bottom: 10px;
     font-family: var(--font-base);
     font-size: 10px;
-    padding: 10px;
+    padding: 15px;
     background-color: #fff;
 }
 
