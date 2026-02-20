@@ -70,16 +70,19 @@ $image_path = null;
 $image_fallback_path = null;
 if (!empty($row['dokumentacja_wizualna'])) {
     $rawImageValue = trim((string)$row['dokumentacja_wizualna']);
+    $normalizedImageValue = trim($rawImageValue, " '\"");
 
-    if (preg_match('#^https?://#i', $rawImageValue) === 1) {
-        $image_path = $rawImageValue;
-    } else {
-        $relativeImagePath = ltrim($rawImageValue, '/');
-        $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
-        $encodedPath = implode('/', $encodedSegments);
+    if ($normalizedImageValue !== '') {
+        if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
+            $image_path = $normalizedImageValue;
+        } else {
+            $relativeImagePath = ltrim($normalizedImageValue, '/');
+            $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
+            $encodedPath = implode('/', $encodedSegments);
 
-        $image_path = 'https://baza.mkal.pl/gfx/' . $encodedPath;
-        $image_fallback_path = 'https://mkalodz.pl/bazagfx/' . $encodedPath;
+            $image_path = 'https://baza.mkal.pl/gfx/' . $encodedPath;
+            $image_fallback_path = 'https://mkalodz.pl/bazagfx/' . $encodedPath;
+        }
     }
 }
 
