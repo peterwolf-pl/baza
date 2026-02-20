@@ -75,6 +75,30 @@ function getNextPrzemieszczenieNumber(PDO $pdo, string $movesTable): string {
     return (string)$stmt->fetchColumn();
 }
 
+function buildImageUrl(?string $rawImageValue): ?string {
+    if ($rawImageValue === null) {
+        return null;
+    }
+
+    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
+    if ($normalizedImageValue === '') {
+        return null;
+    }
+
+    if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
+        return $normalizedImageValue;
+    }
+
+    $relativeImagePath = ltrim($normalizedImageValue, '/');
+    $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
+
+    if (empty($encodedSegments)) {
+        return null;
+    }
+
+    return 'https://baza.mkal.pl/gfx/' . implode('/', $encodedSegments);
+}
+
 $bulkMoveSuccess = null;
 $bulkMoveError = null;
 
@@ -421,6 +445,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
             <table>
                 <thead>
                     <tr>
+                        <th>Miniatura foto</th>
                         <?php foreach ($columns as $col): ?>
                             <th class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">
                                 <?php echo htmlspecialchars($col); ?>
@@ -432,6 +457,14 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
                 <tbody>
                     <?php foreach ($entries as $row): ?>
                         <tr>
+                            <td class="entry-thumbnail-cell">
+                                <?php $thumbnailUrl = buildImageUrl($row['dokumentacja_wizualna'] ?? null); ?>
+                                <?php if ($thumbnailUrl !== null): ?>
+                                    <img class="entry-thumbnail" src="<?php echo htmlspecialchars($thumbnailUrl); ?>" alt="Miniatura wpisu">
+                                <?php else: ?>
+                                    <span>—</span>
+                                <?php endif; ?>
+                            </td>
                             <?php foreach ($columns as $col): ?>
                                 <td class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">
                                     <?php echo htmlspecialchars($row[$col] ?? ''); ?>
