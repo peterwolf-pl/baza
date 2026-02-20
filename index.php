@@ -119,7 +119,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
         </div>
     </div>
 <div class="header-links-left">
-    <button id="toggleButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
+    <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     
     <a role="button" id="toggleButton" href="neww.php">Nowy Wpis</a> 
     

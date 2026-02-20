@@ -7,11 +7,11 @@ header('Content-Type: application/json');
 try {
     // Odczyt danych przesłanych w żądaniu
     $input = json_decode(file_get_contents('php://input'), true);
-    $list_id = $input['list_id'] ?? null;
-    $entry_id = $input['entry_id'] ?? null;
+    $list_id = isset($input['list_id']) ? (int)$input['list_id'] : 0;
+    $entry_id = isset($input['entry_id']) ? (int)$input['entry_id'] : 0;
 
     // Walidacja danych
-    if (!$list_id || !$entry_id) {
+    if ($list_id <= 0 || $entry_id <= 0) {
         echo json_encode(['success' => false, 'message' => 'Brak wymaganych danych.']);
         exit;
     }
