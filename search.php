@@ -489,6 +489,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
         <?php endforeach; ?>
         <button type="submit">Szukaj</button>
     </form>
+             <div class="footer-right">
+        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
+    </div>
 
     <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
         <div class="data-table exact">
@@ -576,7 +579,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
                                     </td>
                                 <?php endforeach; ?>
                                 <td class="no-highlight">
-                                    <a role="button" href="karta.php?id=<?php echo $entryId; ?>">Karta</a>
+                                    <a role="button" id="toggleButton" href="karta.php?id=<?php echo $entryId; ?>">Karta</a>
                                     <select onchange="handleListSelection(this, <?php echo (int)$entryId; ?>)">
                                         <option value="">Dodaj do listy</option>
                                         <option value="new">+ Nowa lista</option>
