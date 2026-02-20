@@ -69,15 +69,4 @@ Prosta aplikacja webowa w PHP do prowadzenia ewidencji obiektów muzealnych i bi
 3. Zaimportuj/utwórz tabele (np. na bazie `create_collection_tables.sql` oraz istniejącego dumpa).
 4. Umieść repozytorium w katalogu serwera i otwórz `login.php`.
 
-## Security notes
 
-- Nie trzymaj prawdziwych danych dostępowych do DB w repozytorium publicznym.
-- W środowisku produkcyjnym wyłącz `display_errors`.
-- Wymuś HTTPS (szczególnie przy logowaniu i tokenach mobilnych).
-
----
-
-Jeżeli chcesz, mogę w kolejnym kroku przygotować także:
-- sekcję **Database schema** (z listą tabel i relacji),
-- sekcję **API endpoints** (request/response dla JSON endpointów),
-- krótką instrukcję **deploymentu na Apache/Nginx**.
