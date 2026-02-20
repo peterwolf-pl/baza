@@ -63,6 +63,77 @@ function isMobileDevice(): bool {
     return preg_match('/android|iphone|ipad|ipod|mobile|blackberry|windows phone/', $agent) === 1;
 }
 
+function createThumbnail(string $sourcePath, string $thumbPath, int $targetHeight = 125, int $quality = 70): bool {
+    if (!extension_loaded('gd')) {
+        return false;
+    }
+
+    $imageInfo = @getimagesize($sourcePath);
+    if (!$imageInfo || empty($imageInfo[0]) || empty($imageInfo[1])) {
+        return false;
+    }
+
+    [$sourceWidth, $sourceHeight, $imageType] = $imageInfo;
+    if ($sourceHeight <= 0) {
+        return false;
+    }
+
+    $targetWidth = max(1, (int)round($sourceWidth * ($targetHeight / $sourceHeight)));
+
+    $createMap = [
+        IMAGETYPE_JPEG => 'imagecreatefromjpeg',
+        IMAGETYPE_PNG => 'imagecreatefrompng',
+        IMAGETYPE_GIF => 'imagecreatefromgif',
+        IMAGETYPE_WEBP => 'imagecreatefromwebp',
+    ];
+
+    if (!isset($createMap[$imageType]) || !function_exists($createMap[$imageType])) {
+        return false;
+    }
+
+    $sourceImage = @$createMap[$imageType]($sourcePath);
+    if ($sourceImage === false) {
+        return false;
+    }
+
+    $thumbImage = imagecreatetruecolor($targetWidth, $targetHeight);
+    if ($thumbImage === false) {
+        imagedestroy($sourceImage);
+        return false;
+    }
+
+    if (in_array($imageType, [IMAGETYPE_PNG, IMAGETYPE_GIF], true)) {
+        imagealphablending($thumbImage, false);
+        imagesavealpha($thumbImage, true);
+        $transparent = imagecolorallocatealpha($thumbImage, 0, 0, 0, 127);
+        imagefilledrectangle($thumbImage, 0, 0, $targetWidth, $targetHeight, $transparent);
+    }
+
+    imagecopyresampled($thumbImage, $sourceImage, 0, 0, 0, 0, $targetWidth, $targetHeight, $sourceWidth, $sourceHeight);
+
+    $result = false;
+    switch ($imageType) {
+        case IMAGETYPE_JPEG:
+            $result = imagejpeg($thumbImage, $thumbPath, $quality);
+            break;
+        case IMAGETYPE_PNG:
+            $pngCompression = (int)round((100 - $quality) * 9 / 100);
+            $result = imagepng($thumbImage, $thumbPath, max(0, min(9, $pngCompression)));
+            break;
+        case IMAGETYPE_GIF:
+            $result = imagegif($thumbImage, $thumbPath);
+            break;
+        case IMAGETYPE_WEBP:
+            $result = imagewebp($thumbImage, $thumbPath, $quality);
+            break;
+    }
+
+    imagedestroy($thumbImage);
+    imagedestroy($sourceImage);
+
+    return $result;
+}
+
 $valid_columns = [
     'numer_ewidencyjny', 'nazwa_tytul', 'czas_powstania', 'inne_numery_ewidencyjne',
     'autor_wytworca', 'miejsce_powstania', 'liczba', 'material',
@@ -133,8 +204,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $photoName = null;
         if (isset($_FILES['mobile_photo']) && $_FILES['mobile_photo']['error'] === UPLOAD_ERR_OK) {
             $uploadDir = __DIR__ . '/gfx';
+            $thumbDir = $uploadDir . '/thumbs';
             if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0775, true);
+            }
+            if (!is_dir($thumbDir)) {
+                mkdir($thumbDir, 0775, true);
             }
 
             $originalName = basename((string)$_FILES['mobile_photo']['name']);
@@ -142,9 +217,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $safeName = $safeName ?: ('zdjecie_' . date('Ymd_His') . '.jpg');
             $targetName = uniqid('mobile_', true) . '_' . $safeName;
             $targetPath = $uploadDir . '/' . $targetName;
+            $thumbPath = $thumbDir . '/' . $targetName;
 
             if (move_uploaded_file($_FILES['mobile_photo']['tmp_name'], $targetPath)) {
                 $photoName = $targetName;
+                createThumbnail($targetPath, $thumbPath, 125, 70);
             }
         }
 

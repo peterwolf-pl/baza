@@ -75,31 +75,6 @@ function getNextPrzemieszczenieNumber(PDO $pdo, string $movesTable): string {
     return (string)$stmt->fetchColumn();
 }
 
-function imageUrlExists(string $url): bool {
-    static $existsCache = [];
-
-    if (array_key_exists($url, $existsCache)) {
-        return $existsCache[$url];
-    }
-
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'HEAD',
-            'timeout' => 1.5,
-            'ignore_errors' => true,
-        ],
-    ]);
-
-    $headers = @get_headers($url, false, $context);
-    if (!is_array($headers) || empty($headers[0])) {
-        $existsCache[$url] = false;
-        return false;
-    }
-
-    $existsCache[$url] = preg_match('/\s(200|301|302)\s/', $headers[0]) === 1;
-    return $existsCache[$url];
-}
-
 function buildThumbPath(string $encodedPath): string {
     return 'thumbs/' . ltrim($encodedPath, '/');
 }
@@ -127,32 +102,17 @@ function buildImagePaths(?string $rawImageValue, string $collection): array {
 
     $encodedPath = implode('/', $encodedSegments);
     $thumbPath = buildThumbPath($encodedPath);
+
     if ($collection === 'ksiazki-artystyczne') {
-        $primaryThumbUrl = 'https://mkalodz.pl/bazagfx/' . $thumbPath;
-        if (imageUrlExists($primaryThumbUrl)) {
-            return [
-                $primaryThumbUrl,
-                'https://mkalodz.pl/bazagfx/' . $encodedPath,
-            ];
-        }
-
         return [
-            'https://mkalodz.pl/bazagfx/' . $encodedPath,
-            'https://baza.mkal.pl/gfx/' . $encodedPath,
-        ];
-    }
-
-    $primaryThumbUrl = 'https://baza.mkal.pl/gfx/' . $thumbPath;
-    if (imageUrlExists($primaryThumbUrl)) {
-        return [
-            $primaryThumbUrl,
-            'https://baza.mkal.pl/gfx/' . $encodedPath,
+            'https://mkalodz.pl/bazagfx/' . $thumbPath,
+            'https://baza.mkal.pl/gfx/' . $thumbPath,
         ];
     }
 
     return [
-        'https://baza.mkal.pl/gfx/' . $encodedPath,
-        'https://mkalodz.pl/bazagfx/' . $encodedPath,
+        'https://baza.mkal.pl/gfx/' . $thumbPath,
+        'https://mkalodz.pl/bazagfx/' . $thumbPath,
     ];
 }
 
