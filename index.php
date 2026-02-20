@@ -69,14 +69,32 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
             $columns[] = $row['Field'];
         }
 
+        // Pobierz nazwę kolumny klucza głównego (na różnych kolekcjach może się różnić)
+        $primaryKeyColumn = null;
+        $pkStmt = $pdo->query("SHOW KEYS FROM {$mainTable} WHERE Key_name = 'PRIMARY'");
+        while ($pkRow = $pkStmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!empty($pkRow['Column_name'])) {
+                $primaryKeyColumn = $pkRow['Column_name'];
+                break;
+            }
+        }
+
         // !!! UWAGA: w MySQL nie używaj bindValue do LIMIT/OFFSET !!!
-        $stmt = $pdo->query("SELECT * FROM {$mainTable} LIMIT $offset, $limit");
+        if ($primaryKeyColumn !== null) {
+            $selectSql = "SELECT *, {$primaryKeyColumn} AS __row_id FROM {$mainTable}";
+        } else {
+            $selectSql = "SELECT * FROM {$mainTable}";
+        }
+        $selectSql .= " LIMIT $offset, $limit";
+
+        $stmt = $pdo->query($selectSql);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         header('Content-Type: application/json');
         echo json_encode([
             'rows' => $rows,
-            'columns' => $columns
+            'columns' => $columns,
+            'primary_key' => $primaryKeyColumn
         ]);
     } catch (Exception $e) {
         http_response_code(500);
@@ -263,6 +281,8 @@ function toggleColumn(column) {
 // Dodawanie do list
 function handleListSelection(select, entryId) {
     const selectedValue = select.value;
+    const normalizedEntryId = Number.parseInt(entryId, 10);
+
     function showTemporaryMessage(message, type = 'success') {
         const messageContainer = document.createElement('div');
         messageContainer.textContent = message;
@@ -278,13 +298,19 @@ function handleListSelection(select, entryId) {
         setTimeout(() => { messageContainer.remove(); }, 1000);
     }
 
+    if (selectedValue && (!Number.isInteger(normalizedEntryId) || normalizedEntryId <= 0)) {
+        showTemporaryMessage("Wystąpił błąd: nie udało się odczytać ID wpisu.", 'error');
+        select.value = '';
+        return;
+    }
+
     if (selectedValue === "new") {
         const newListName = prompt("Podaj nazwę nowej listy:");
         if (newListName) {
             fetch('add_list.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newListName, entry_id: entryId, collection: selectedCollection })
+                body: JSON.stringify({ name: newListName, entry_id: normalizedEntryId, collection: selectedCollection })
             })
             .then(response => response.json())
             .then(data => {
@@ -300,7 +326,7 @@ function handleListSelection(select, entryId) {
         fetch('add_to_list.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ list_id: selectedValue, entry_id: entryId, collection: selectedCollection })
+            body: JSON.stringify({ list_id: selectedValue, entry_id: normalizedEntryId, collection: selectedCollection })
         })
         .then(response => response.json())
         .then(data => {
@@ -330,6 +356,32 @@ function getListOptionsHtml() {
     return html;
 }
 
+function getRowId(row, columns, primaryKeyColumn) {
+    if (row['__row_id'] !== undefined && row['__row_id'] !== null && row['__row_id'] !== '') {
+        return Number.parseInt(row['__row_id'], 10);
+    }
+
+    if (primaryKeyColumn && row[primaryKeyColumn] !== undefined && row[primaryKeyColumn] !== null && row[primaryKeyColumn] !== '') {
+        return Number.parseInt(row[primaryKeyColumn], 10);
+    }
+
+    const directIdKey = Object.keys(row).find(key => key && key.trim().toLowerCase() === 'id');
+    if (directIdKey) {
+        return Number.parseInt(row[directIdKey], 10);
+    }
+
+    if (Array.isArray(columns) && columns.length > 0) {
+        const firstColumn = columns[0];
+        if (row[firstColumn] !== undefined && row[firstColumn] !== null && row[firstColumn] !== '') {
+            return Number.parseInt(row[firstColumn], 10);
+        }
+    }
+
+    return NaN;
+}
+
+
+
 function loadRows() {
     if (loading || noMoreRows) return;
     loading = true;
@@ -354,6 +406,7 @@ function loadRows() {
             const tableBody = document.getElementById('tableBody');
             const columns = data.columns;
             const rows = data.rows;
+            const primaryKeyColumn = data.primary_key || null;
 
             if (rows.length === 0) {
                 noMoreRows = true;
@@ -375,11 +428,15 @@ function loadRows() {
                 // Opcje
                 const tdOptions = document.createElement('td');
                 tdOptions.width = "222";
-                // użyj klucza ID lub id (wykryj automatycznie)
-                const idField = row['ID'] !== undefined ? 'ID' : (row['id'] !== undefined ? 'id' : columns[0]);
+                const rowId = getRowId(row, columns, primaryKeyColumn);
+                const hasValidRowId = Number.isInteger(rowId) && rowId > 0;
+                const entryIdForHandlers = hasValidRowId ? rowId : 0;
+                const kartaHref = hasValidRowId
+                    ? `karta.php?id=${rowId}&collection=${encodeURIComponent(selectedCollection)}`
+                    : '#';
                 tdOptions.innerHTML = `
-                    <a role="button" id="toggleButton" href="karta.php?id=${row[idField]}&collection=${encodeURIComponent(selectedCollection)}">Karta</a>
-                    <select onchange="handleListSelection(this, ${row[idField]})">
+                    <a role="button" id="toggleButton" href="${kartaHref}">Karta</a>
+                    <select onchange="handleListSelection(this, ${entryIdForHandlers})">
                         ${getListOptionsHtml()}
                     </select>
                 `;
