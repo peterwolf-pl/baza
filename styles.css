@@ -109,7 +109,7 @@ button,
 #toggleBulkPrzemieszczenieButton,
 #toggleCommonPrzemieszczeniaButton {
     font-family: var(--font-base);
-    padding: 8px 16px;
+    padding: 5px 11px;
     margin-bottom: 10px;
 }
 
@@ -354,6 +354,8 @@ th,
     bottom: 10px;
     font-family: var(--font-base);
     font-size: 10px;
+    padding: 10px;
+    background-color: #fff;
 }
 
 .footer-right a {
