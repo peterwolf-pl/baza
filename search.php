@@ -52,6 +52,23 @@ function normalizeText($text) {
     $t = asciiFold($t);
     return $t;
 }
+function normalizeSearchQuery($text) {
+    $t = normalizeText($text);
+    $t = preg_replace('/[^a-z0-9\s]+/', ' ', $t);
+    $t = preg_replace('/\s+/', ' ', $t);
+    return trim($t);
+}
+function sqlFoldExpr($field) {
+    $expr = "LOWER(CAST($field AS CHAR))";
+    $map = [
+        'ą' => 'a', 'ć' => 'c', 'ę' => 'e', 'ł' => 'l', 'ń' => 'n',
+        'ó' => 'o', 'ś' => 's', 'ż' => 'z', 'ź' => 'z'
+    ];
+    foreach ($map as $from => $to) {
+        $expr = "REPLACE($expr, '$from', '$to')";
+    }
+    return $expr;
+}
 function minLevenshteinSubstr($haystack, $needle) {
     $h = normalizeText($haystack);
     $n = normalizeText($needle);
@@ -93,6 +110,8 @@ function minLevenshteinSubstr($haystack, $needle) {
 /** Budowa kandydatów fuzzy z progresywnym prefiksem **/
 function fetchFuzzyCandidates(PDO $pdo, array $fields, string $q_like): array {
     $q_like = normalizeForLike($q_like);
+    $q_fold = normalizeSearchQuery($q_like);
+    $tokens = array_values(array_filter(explode(' ', $q_fold)));
     $len = mb_strlen($q_like, 'UTF-8');
     $lengths = [];
     if ($len >= 4) { $lengths = [4,3,2,1]; }
@@ -109,6 +128,15 @@ function fetchFuzzyCandidates(PDO $pdo, array $fields, string $q_like): array {
         foreach ($fields as $ff) {
             $conds[] = "LOWER(CAST($ff AS CHAR)) LIKE ?";
             $params[] = $like;
+            $foldExpr = sqlFoldExpr($ff);
+            $conds[] = "$foldExpr LIKE ?";
+            $params[] = '%' . mb_substr($q_fold, 0, $L, 'UTF-8') . '%';
+
+            foreach ($tokens as $tok) {
+                if (mb_strlen($tok, 'UTF-8') < 3) continue;
+                $conds[] = "$foldExpr LIKE ?";
+                $params[] = '%' . $tok . '%';
+            }
         }
         if (!$conds) { break; }
 
@@ -143,13 +171,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
     $levenshtein_distance = isset($_POST['levenshtein_distance']) ? (int)$_POST['levenshtein_distance'] : 2;
 
     $q_like = normalizeForLike($query_string);
+    $q_fold = normalizeSearchQuery($query_string);
+    $q_tokens = array_values(array_filter(explode(' ', $q_fold)));
 
     // Dokładne LIKE w całej tabeli
     $where = [];
-    foreach ($columns as $col) { $where[] = "LOWER(CAST($col AS CHAR)) LIKE :query"; }
+    $params = ['query' => '%' . $q_like . '%', 'query_fold' => '%' . $q_fold . '%'];
+    foreach ($columns as $col) {
+        $where[] = "LOWER(CAST($col AS CHAR)) LIKE :query";
+        $where[] = sqlFoldExpr($col) . " LIKE :query_fold";
+    }
+
+    $tokIdx = 0;
+    foreach ($q_tokens as $tok) {
+        if (mb_strlen($tok, 'UTF-8') < 3) continue;
+        $key = 'tok_' . $tokIdx++;
+        $params[$key] = '%' . $tok . '%';
+        foreach ($columns as $col) {
+            $where[] = sqlFoldExpr($col) . " LIKE :$key";
+        }
+    }
+
     $where_clause = implode(' OR ', $where);
     $stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna WHERE $where_clause LIMIT 100");
-    $stmt->execute(['query' => '%' . $q_like . '%']);
+    $stmt->execute($params);
     $search_results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Fuzzy
