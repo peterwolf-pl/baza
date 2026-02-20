@@ -339,25 +339,32 @@ function getListOptionsHtml() {
 }
 
 function getRowId(row, columns) {
-    if (row['ID'] !== undefined && row['ID'] !== null && row['ID'] !== '') {
-        return Number.parseInt(row['ID'], 10);
-    }
-    if (row['id'] !== undefined && row['id'] !== null && row['id'] !== '') {
-        return Number.parseInt(row['id'], 10);
+    const normalizedKeys = Object.keys(row).map(key => ({
+        original: key,
+        normalized: key.trim().toLowerCase()
+    }));
+
+    const directIdKey = normalizedKeys.find(item => item.normalized === 'id');
+    if (directIdKey) {
+        return Number.parseInt(row[directIdKey.original], 10);
     }
 
-    const idKey = Object.keys(row).find(key => key.toLowerCase() === 'id');
-    if (idKey) {
-        return Number.parseInt(row[idKey], 10);
-    }
-
-    const idColumn = columns.find(col => col.toLowerCase() === 'id');
+    const idColumn = columns.find(col => (col || '').trim().toLowerCase() === 'id');
     if (idColumn && row[idColumn] !== undefined && row[idColumn] !== null && row[idColumn] !== '') {
         return Number.parseInt(row[idColumn], 10);
     }
 
+    // fallback: pierwszy zwracany klucz (zachowanie zgodne z wcześniejszą wersją)
+    if (Array.isArray(columns) && columns.length > 0) {
+        const firstColumn = columns[0];
+        if (row[firstColumn] !== undefined && row[firstColumn] !== null && row[firstColumn] !== '') {
+            return Number.parseInt(row[firstColumn], 10);
+        }
+    }
+
     return NaN;
 }
+
 
 function loadRows() {
     if (loading || noMoreRows) return;
@@ -410,11 +417,9 @@ function loadRows() {
                 const kartaHref = hasValidRowId
                     ? `karta.php?id=${rowId}&collection=${encodeURIComponent(selectedCollection)}`
                     : '#';
-                const selectDisabled = hasValidRowId ? '' : 'disabled';
-
                 tdOptions.innerHTML = `
                     <a role="button" id="toggleButton" href="${kartaHref}">Karta</a>
-                    <select ${selectDisabled} onchange="handleListSelection(this, ${entryIdForHandlers})">
+                    <select onchange="handleListSelection(this, ${entryIdForHandlers})">
                         ${getListOptionsHtml()}
                     </select>
                 `;
