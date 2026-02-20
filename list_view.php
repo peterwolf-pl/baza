@@ -192,10 +192,15 @@ $lists = $listsStmt->fetchAll(PDO::FETCH_ASSOC);
 // Domyślne widoczne kolumny
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 $showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
 
 if (isset($_POST['show_thumbnail_column'])) {
     $showThumbnailColumn = $_POST['show_thumbnail_column'] === '1';
     $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
+}
+if (isset($_POST['thumbnail_size'])) {
+    $thumbnailSize = max(25, min(111, (int)$_POST['thumbnail_size']));
+    $_SESSION['thumbnail_size'] = $thumbnailSize;
 }
 
 // Przechwytywanie wyboru kolumn przez POST lub sesję (wspólne między podstronami)
@@ -283,6 +288,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
     <meta charset="UTF-8">
     <title>baza.mkal.pl - Lista: <?php echo htmlspecialchars($list['list_name']); ?></title>
         <link rel="stylesheet" href="styles.css">
+    <style>:root { --thumbnail-height: <?php echo (int)$thumbnailSize; ?>px; }</style>
     <script>
         // przekazujemy wybrane kolumny do JS
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
@@ -450,6 +456,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
    
     <form id="columnSelectorContainer" class="column-selector" method="post" action="">
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
+        <input type="hidden" name="thumbnail_size" value="<?php echo (int)$thumbnailSize; ?>">
         <input type="hidden" name="show_thumbnail_column" value="0">
         <label>
             <input type="checkbox" name="show_thumbnail_column" value="1" onclick="showThumbnailColumn=this.checked;updateColumnDisplay();" <?php echo $showThumbnailColumn ? 'checked' : ''; ?>>

@@ -44,10 +44,15 @@ $query_string = '';
 $has_search = false;
 $search_state_id = '';
 $showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
 
 if (isset($_POST['show_thumbnail_column'])) {
     $showThumbnailColumn = $_POST['show_thumbnail_column'] === '1';
     $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
+}
+if (isset($_POST['thumbnail_size'])) {
+    $thumbnailSize = max(25, min(111, (int)$_POST['thumbnail_size']));
+    $_SESSION['thumbnail_size'] = $thumbnailSize;
 }
 
 // Przechwytywanie wyboru kolumn
@@ -148,6 +153,9 @@ if (isset($_GET['state'])) {
         if (array_key_exists('show_thumbnail_column', $state)) {
             $showThumbnailColumn = (bool)$state['show_thumbnail_column'];
         }
+        if (array_key_exists('thumbnail_size', $state)) {
+            $thumbnailSize = max(25, min(111, (int)$state['thumbnail_size']));
+        }
         $has_search = true;
     }
 }
@@ -189,6 +197,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
         'query_string' => $query_string,
         'search_results' => $search_results,
         'selected_columns' => $selectedColumns,
+        'show_thumbnail_column' => $showThumbnailColumn,
+        'thumbnail_size' => $thumbnailSize,
         'created_at' => time()
     ];
     if (count($_SESSION['search_states']) > 20) {
@@ -208,11 +218,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     <meta charset="UTF-8">
     <title>Wyniki wyszukiwania | baza.mkal.pl</title>
         <link rel="stylesheet" href="styles.css">
+    <style>:root { --thumbnail-height: <?php echo (int)$thumbnailSize; ?>px; }</style>
     <script>
         // kolumny widoczności
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
         let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
-        let thumbnailSizePx = 90;
+        let thumbnailSizePx = <?php echo (int)$thumbnailSize; ?>;
         const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
         // globalny zbiór zaznaczeń z obu tabel
@@ -251,10 +262,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
             const value = document.getElementById('thumbnailSizeValue');
             if (slider) slider.value = String(thumbnailSizePx);
             if (value) value.textContent = thumbnailSizePx + 'px';
+            const hidden = document.getElementById('thumbnailSizeHidden');
+            if (hidden) hidden.value = String(thumbnailSizePx);
         }
         window.addEventListener('DOMContentLoaded', () => {
             updateColumnDisplay();
-            updateThumbnailSize(90);
+            updateThumbnailSize(thumbnailSizePx);
         });
 
         function toast(msg, type='success'){
@@ -511,14 +524,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     <form method="post" onsubmit="suppressUnloadWarning = true;">
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
         <input type="hidden" name="show_thumbnail_column" value="<?php echo $showThumbnailColumn ? '1' : '0'; ?>">
+        <input type="hidden" name="thumbnail_size" value="<?php echo (int)$thumbnailSize; ?>" id="thumbnailSizeHidden">
         <input type="text" name="query" value="<?php echo htmlspecialchars($query_string); ?>" required>
         <?php foreach ($selectedColumns as $col): ?>
             <input type="hidden" name="visible_columns[]" value="<?php echo $col; ?>">
         <?php endforeach; ?>
         <button type="submit">Szukaj</button>
         <label class="thumbnail-size-control" for="thumbnailSizeSlider">
-            <input type="range" id="thumbnailSizeSlider" min="25" max="111" value="90" oninput="updateThumbnailSize(this.value)">
-            <span id="thumbnailSizeValue">90px</span>
+            <input type="range" id="thumbnailSizeSlider" min="25" max="111" value="<?php echo (int)$thumbnailSize; ?>" oninput="updateThumbnailSize(this.value)">
+            <span id="thumbnailSizeValue"><?php echo (int)$thumbnailSize; ?>px</span>
         </label>
     </form>
              <div class="footer-right">

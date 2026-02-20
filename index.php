@@ -162,6 +162,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
     $data = json_decode($rawInput, true);
     $requested = (isset($data['visible_columns']) && is_array($data['visible_columns'])) ? $data['visible_columns'] : [];
     $showThumbnailColumn = isset($data['show_thumbnail_column']) ? (bool)$data['show_thumbnail_column'] : true;
+    $thumbnailSize = isset($data['thumbnail_size']) ? (int)$data['thumbnail_size'] : 90;
+    $thumbnailSize = max(25, min(111, $thumbnailSize));
 
     $columns = [];
     $query = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
@@ -172,6 +174,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
     $selectedColumns = array_values(array_intersect($columns, $requested));
     $_SESSION['visible_columns'] = $selectedColumns;
     $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
+    $_SESSION['thumbnail_size'] = $thumbnailSize;
 
     echo json_encode(['success' => true]);
     exit;
@@ -195,6 +198,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
     ? array_values(array_intersect($columns, $_SESSION['visible_columns']))
     : $defaultVisibleColumns;
 $showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -202,6 +206,7 @@ $showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
     <meta charset="UTF-8">
     <title>baza.mkal.pl</title>
         <link rel="stylesheet" href="styles.css">
+    <style>:root { --thumbnail-height: <?php echo (int)$thumbnailSize; ?>px; }</style>
 </head>
 <body>
     <div class="header">
@@ -247,6 +252,11 @@ $showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
    
  </div>
     <div id="columnSelectorContainer" class="column-selector">
+        <label class="thumbnail-size-control" for="thumbnailSizeSlider">
+            Rozmiar miniatury
+            <input type="range" id="thumbnailSizeSlider" min="25" max="111" value="<?php echo (int)$thumbnailSize; ?>" oninput="updateThumbnailSize(this.value)">
+            <span id="thumbnailSizeValue"><?php echo (int)$thumbnailSize; ?>px</span>
+        </label>
         <label>
             <input type="checkbox" id="thumbnailColumnCheckbox" onclick="toggleThumbnailColumn()" <?php echo $showThumbnailColumn ? 'checked' : ''; ?>>
             Miniatura foto
@@ -290,6 +300,7 @@ const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 // Kolumny widoczne na start
 const defaultVisibleColumns = <?php echo json_encode($selectedColumns); ?>;
 let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
+let thumbnailSizePx = <?php echo (int)$thumbnailSize; ?>;
 let saveColumnsTimeout = null;
 
 function toggleColumnSelector() {
@@ -313,8 +324,21 @@ function persistVisibleColumns() {
     fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=save_visible_columns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visible_columns: visibleColumns, show_thumbnail_column: showThumbnailColumn })
+        body: JSON.stringify({ visible_columns: visibleColumns, show_thumbnail_column: showThumbnailColumn, thumbnail_size: thumbnailSizePx })
     }).catch(err => console.error('Błąd zapisu kolumn:', err));
+}
+
+function updateThumbnailSize(size) {
+    thumbnailSizePx = Math.max(25, Math.min(111, Number(size) || 90));
+    document.documentElement.style.setProperty('--thumbnail-height', thumbnailSizePx + 'px');
+
+    const slider = document.getElementById('thumbnailSizeSlider');
+    const value = document.getElementById('thumbnailSizeValue');
+    if (slider) slider.value = String(thumbnailSizePx);
+    if (value) value.textContent = thumbnailSizePx + 'px';
+
+    if (saveColumnsTimeout) clearTimeout(saveColumnsTimeout);
+    saveColumnsTimeout = setTimeout(persistVisibleColumns, 150);
 }
 
 function toggleThumbnailColumn() {
@@ -546,6 +570,7 @@ function loadRows() {
 }
 
 toggleThumbnailColumn();
+updateThumbnailSize(thumbnailSizePx);
 
 // Ładowanie początkowe
 loadRows();
