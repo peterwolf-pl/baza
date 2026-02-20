@@ -133,6 +133,19 @@ button,
     font-size: 12px;
 }
 
+button:hover,
+#toggleButton:hover,
+#toggleColumndButton:hover,
+#toggleColumnButton:hover,
+#togglePrzemieszczeniaButton:hover,
+#toggleBulkPrzemieszczenieButton:hover,
+#toggleCommonPrzemieszczeniaButton:hover,
+.edit-btn:hover,
+.delete-btn:hover,
+.remove-btn:hover {
+    background-color: #074188;
+}
+
 button:focus,
 #toggleButton:focus,
 #toggleColumndButton:focus,
