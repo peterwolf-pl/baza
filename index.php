@@ -80,9 +80,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
         }
 
         // !!! UWAGA: w MySQL nie używaj bindValue do LIMIT/OFFSET !!!
-        $selectSql = "SELECT * FROM {$mainTable}";
         if ($primaryKeyColumn !== null) {
-            $selectSql .= ", {$primaryKeyColumn} AS __row_id";
+            $selectSql = "SELECT *, {$primaryKeyColumn} AS __row_id FROM {$mainTable}";
+        } else {
+            $selectSql = "SELECT * FROM {$mainTable}";
         }
         $selectSql .= " LIMIT $offset, $limit";
 
