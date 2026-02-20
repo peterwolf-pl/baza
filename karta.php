@@ -48,6 +48,7 @@ if (!isset($_GET['id'])) {
 }
 
 $id = intval($_GET['id']);
+$isFirstOpenFromMobileAdd = isset($_GET['from_mobile_add']) && $_GET['from_mobile_add'] === '1';
 $searchReturnUrl = '';
 if (isset($_GET['search_return'])) {
     $candidateReturnUrl = trim((string)$_GET['search_return']);
@@ -276,6 +277,9 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
     <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Powrót do listy</a>
     <?php if ($searchReturnUrl !== ''): ?>
         <a role="button" id="toggleButton" href="<?php echo htmlspecialchars($searchReturnUrl); ?>">Powrót do wyszukiwania</a>
+    <?php endif; ?>
+    <?php if ($isFirstOpenFromMobileAdd): ?>
+        <a role="button" class="mobile-next-button" href="mobile_add.php?collection=<?php echo urlencode($selectedCollection); ?>&mobile=1">Dodaj następny</a>
     <?php endif; ?>
 </div>
     
