@@ -9,6 +9,20 @@ if (!isset($_SESSION['user_id'])) {
 // Połączenie z bazą danych
 include 'db.php';
 
+$collections = [
+    'ksiazki-artystyczne' => 'karta_ewidencyjna',
+    'kolekcja-maszyn' => 'karta_ewidencyjna_maszyny',
+    'kolekcja-matryc' => 'karta_ewidencyjna_matryce',
+    'biblioteka' => 'karta_ewidencyjna_bib',
+];
+
+$selectedCollection = $_GET['collection'] ?? 'ksiazki-artystyczne';
+if (!isset($collections[$selectedCollection])) {
+    $selectedCollection = 'ksiazki-artystyczne';
+}
+
+$mainTable = $collections[$selectedCollection];
+
 $valid_columns = [
             'numer_ewidencyjny', 'nazwa_tytul', 'czas_powstania', 'inne_numery_ewidencyjne',
             'autor_wytworca', 'miejsce_powstania', 'liczba', 'material', 
@@ -29,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_karta'])) {
         foreach ($valid_columns as $column) {
             if ($column === 'numer_ewidencyjny') {
                 // Automatyczne generowanie numeru ewidencyjnego (ostatni numer + 1)
-                $stmt = $pdo->query("SELECT IFNULL(MAX(numer_ewidencyjny), 0) AS max_num FROM karta_ewidencyjna");
+                $stmt = $pdo->query("SELECT IFNULL(MAX(numer_ewidencyjny), 0) AS max_num FROM {$mainTable}");
                 $result = $stmt->fetch(PDO::FETCH_ASSOC);
                 $new_data[$column] = $result['max_num'] + 1;
             } elseif ($column === 'data_opracowania') {
@@ -41,14 +55,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_karta'])) {
         }
 
         // Tworzenie zapytania SQL
-        $sql = "INSERT INTO karta_ewidencyjna (" . implode(", ", array_keys($new_data)) . ") VALUES (" . implode(", ", array_map(fn($key) => ":$key", array_keys($new_data))) . ")";
+        $sql = "INSERT INTO {$mainTable} (" . implode(", ", array_keys($new_data)) . ") VALUES (" . implode(", ", array_map(fn($key) => ":$key", array_keys($new_data))) . ")";
 
         // Wykonanie zapytania
         $insert_stmt = $pdo->prepare($sql);
         $insert_stmt->execute($new_data);
 
         // Przeładuj stronę lub przekieruj do nowo utworzonego wpisu
-        header("Location: karta.php?id=" . $pdo->lastInsertId());
+        header("Location: karta.php?id=" . $pdo->lastInsertId() . "&collection=" . urlencode($selectedCollection));
         exit;
     } catch (PDOException $e) {
         echo "Błąd dodawania: " . $e->getMessage();
@@ -71,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_karta'])) {
         </a>
     </div>
 
-    <a role="button" id="toggleButton" href="index.php">Powrót do listy</a> 
+    <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Powrót do listy</a> 
     
     <h1>Dodaj Nową Pozycję Ewidencyjną</h1>
     <form method="post" class="add-form">

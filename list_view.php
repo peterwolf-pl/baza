@@ -11,19 +11,51 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
+
+$collections = [
+    'ksiazki-artystyczne' => [
+        'main' => 'karta_ewidencyjna',
+        'moves' => 'karta_ewidencyjna_przemieszczenia',
+    ],
+    'kolekcja-maszyn' => [
+        'main' => 'karta_ewidencyjna_maszyny',
+        'moves' => 'karta_ewidencyjna_maszyny_przemieszczenia',
+    ],
+    'kolekcja-matryc' => [
+        'main' => 'karta_ewidencyjna_matryce',
+        'moves' => 'karta_ewidencyjna_matryce_przemieszczenia',
+    ],
+    'biblioteka' => [
+        'main' => 'karta_ewidencyjna_bib',
+        'moves' => 'karta_ewidencyjna_bib_przemieszczenia',
+    ],
+];
+
+$selectedCollection = $_GET['collection'] ?? ($_POST['collection'] ?? 'ksiazki-artystyczne');
+if (!isset($collections[$selectedCollection])) {
+    $selectedCollection = 'ksiazki-artystyczne';
+}
+$mainTable = $collections[$selectedCollection]['main'];
+$movesTable = $collections[$selectedCollection]['moves'];
+
+$listColumns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);
+if (!in_array('collection', $listColumns, true)) {
+    $pdo->exec("ALTER TABLE lists ADD COLUMN collection VARCHAR(64) NOT NULL DEFAULT 'ksiazki-artystyczne'");
+}
+
 $list_id = $_GET['list_id'] ?? null;
 if (!$list_id) {
     echo "Nieprawidłowy identyfikator listy.";
     exit;
 }
 
-function ensureMoveUsernameColumn(PDO $pdo): bool {
+function ensureMoveUsernameColumn(PDO $pdo, string $movesTable): bool {
     try {
-        $moveTableColumns = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna_przemieszczenia")
+        $moveTableColumns = $pdo->query("SHOW COLUMNS FROM {$movesTable}")
             ->fetchAll(PDO::FETCH_COLUMN);
 
         if (!in_array('user_username', $moveTableColumns, true)) {
-            $pdo->exec("ALTER TABLE karta_ewidencyjna_przemieszczenia ADD COLUMN user_username VARCHAR(255) NULL");
+            $pdo->exec("ALTER TABLE {$movesTable} ADD COLUMN user_username VARCHAR(255) NULL");
         }
 
         return true;
@@ -32,12 +64,12 @@ function ensureMoveUsernameColumn(PDO $pdo): bool {
     }
 }
 
-$hasMoveUsernameColumn = ensureMoveUsernameColumn($pdo);
+$hasMoveUsernameColumn = ensureMoveUsernameColumn($pdo, $movesTable);
 
-function getNextPrzemieszczenieNumber(PDO $pdo): string {
+function getNextPrzemieszczenieNumber(PDO $pdo, string $movesTable): string {
     $stmt = $pdo->query(
         "SELECT COALESCE(MAX(CAST(numer_przemieszczenia AS UNSIGNED)), 0) + 1
-         FROM karta_ewidencyjna_przemieszczenia
+         FROM {$movesTable}
          WHERE numer_przemieszczenia REGEXP '^[0-9]+$'"
     );
     return (string)$stmt->fetchColumn();
@@ -65,17 +97,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszcze
             try {
                 $pdo->beginTransaction();
 
-                $numerPrzemieszczenia = getNextPrzemieszczenieNumber($pdo);
+                $numerPrzemieszczenia = getNextPrzemieszczenieNumber($pdo, $movesTable);
 
                 if ($hasMoveUsernameColumn) {
                     $insertStmt = $pdo->prepare(
-                        "INSERT INTO karta_ewidencyjna_przemieszczenia
+                        "INSERT INTO {$movesTable}
                         (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia, user_username)
                         VALUES (?, ?, ?, ?, ?, ?, ?)"
                     );
                 } else {
                     $insertStmt = $pdo->prepare(
-                        "INSERT INTO karta_ewidencyjna_przemieszczenia
+                        "INSERT INTO {$movesTable}
                         (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia)
                         VALUES (?, ?, ?, ?, ?, ?)"
                     );
@@ -112,13 +144,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszcze
 
 // Pobierz nazwy kolumn z tabeli
 $columns = [];
-$colsStmt = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
+$colsStmt = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
 while ($row = $colsStmt->fetch(PDO::FETCH_ASSOC)) {
     $columns[] = $row['Field'];
 }
 
 // Pobierz listy do nagłówka i selecta
-$lists = $pdo->query("SELECT id, list_name FROM lists ORDER BY list_name")->fetchAll(PDO::FETCH_ASSOC);
+$listsStmt = $pdo->prepare("SELECT id, list_name FROM lists WHERE collection = ? ORDER BY list_name");
+$listsStmt->execute([$selectedCollection]);
+$lists = $listsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Domyślne widoczne kolumny
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
@@ -137,15 +171,15 @@ if (isset($_POST['visible_columns']) && is_array($_POST['visible_columns'])) {
 $stmt = $pdo->prepare("
     SELECT ke.*
     FROM list_items li
-    JOIN karta_ewidencyjna ke ON li.entry_id = ke.ID
+    JOIN {$mainTable} ke ON li.entry_id = ke.ID
     WHERE li.list_id = ?
 ");
 $stmt->execute([$list_id]);
 $entries = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Pobierz nazwę listy
-$stmtName = $pdo->prepare("SELECT list_name FROM lists WHERE id = ?");
-$stmtName->execute([$list_id]);
+$stmtName = $pdo->prepare("SELECT list_name FROM lists WHERE id = ? AND collection = ?");
+$stmtName->execute([$list_id, $selectedCollection]);
 $list = $stmtName->fetch(PDO::FETCH_ASSOC);
 if (!$list) {
     echo "Lista nie istnieje.";
@@ -172,7 +206,7 @@ if (!empty($entryIdsForList)) {
                 powod_cel_przemieszczenia,
                 user_username,
                 COUNT(DISTINCT karta_id) AS karta_count
-            FROM karta_ewidencyjna_przemieszczenia
+            FROM {$movesTable}
             WHERE karta_id IN ($placeholders)
             GROUP BY data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia, user_username
             HAVING karta_count = ?
@@ -187,7 +221,7 @@ if (!empty($entryIdsForList)) {
                 miejsce_przemieszczenia,
                 powod_cel_przemieszczenia,
                 COUNT(DISTINCT karta_id) AS karta_count
-            FROM karta_ewidencyjna_przemieszczenia
+            FROM {$movesTable}
             WHERE karta_id IN ($placeholders)
             GROUP BY data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia
             HAVING karta_count = ?
@@ -200,7 +234,7 @@ if (!empty($entryIdsForList)) {
     $commonPrzemieszczenia = $commonMovesStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-$nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
+$nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -211,6 +245,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     <script>
         // przekazujemy wybrane kolumny do JS
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
+        const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
         function toggleColumnSelector() {
             const container = document.getElementById('columnSelectorContainer');
@@ -304,7 +339,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
                     fetch('add_list.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: newListName, entry_id: entryId })
+                        body: JSON.stringify({ name: newListName, entry_id: entryId, collection: selectedCollection })
                     })
                     .then(r => r.json())
                     .then(data => {
@@ -320,7 +355,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
                 fetch('add_to_list.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ list_id: selectedValue, entry_id: entryId })
+                    body: JSON.stringify({ list_id: selectedValue, entry_id: entryId, collection: selectedCollection })
                 })
                 .then(r => r.json())
                 .then(data => {
@@ -351,13 +386,13 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
             <img src="bazamka.png" width="400" alt="Logo bazy Muzeum Książki Artystycznej" class="logo">
         </a><br>
         <div class="header-links-left">
-        <a role="button" id="toggleButton" href="index.php">Wróć do głównej</a>
+        <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Wróć do głównej</a>
         <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     </div>
         <div class="header-links">
             <div class="header-low">
             <?php foreach ($lists as $l): ?>
-                <a href="list_view.php?list_id=<?php echo (int)$l['id']; ?>"><?php echo htmlspecialchars($l['list_name']); ?></a>
+                <a href="list_view.php?list_id=<?php echo (int)$l['id']; ?>&collection=<?php echo urlencode($selectedCollection); ?>"><?php echo htmlspecialchars($l['list_name']); ?></a>
             <?php endforeach; ?>
         </div></div>
     </div>
@@ -369,6 +404,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     
    
     <form id="columnSelectorContainer" class="column-selector" method="post" action="">
+        <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
         <?php foreach ($columns as $col): ?>
             <label>
                 <input type="checkbox" name="visible_columns[]" value="<?php echo $col; ?>"
@@ -406,7 +442,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
                                 $idField = isset($row['ID']) ? 'ID' : (isset($row['id']) ? 'id' : $columns[0]);
                                 $entryId = $row[$idField];
                                 ?>
-                                <a role="button" id="toggleButton"href="karta.php?id=<?php echo (int)$entryId; ?>">Karta</a>
+                                <a role="button" id="toggleButton"href="karta.php?id=<?php echo (int)$entryId; ?>&collection=<?php echo urlencode($selectedCollection); ?>">Karta</a>
                                 <select onchange="handleListSelection(this, <?php echo (int)$entryId; ?>)">
                                     <option value="">Dodaj do listy</option>
                                     <option value="new">+ Nowa lista</option>
@@ -428,6 +464,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
             <div id="bulkPrzemieszczenieContainer">
                 <h3>Nowe przemieszczenie dla całej listy</h3>
                 <form method="post" class="bulk-form">
+                    <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
                     <input type="hidden" name="add_bulk_przemieszczenie" value="1">
 
                     <label for="data_przemieszczenia">Data Przemieszczenia</label>

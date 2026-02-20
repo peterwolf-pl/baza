@@ -14,6 +14,15 @@ $username = $_SESSION['username'] ?? '';
 
 include 'db.php';
 
+function ensureListsCollectionColumn(PDO $pdo): void {
+    $columns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);
+    if (!in_array('collection', $columns, true)) {
+        $pdo->exec("ALTER TABLE lists ADD COLUMN collection VARCHAR(64) NOT NULL DEFAULT 'ksiazki-artystyczne'");
+    }
+}
+
+ensureListsCollectionColumn($pdo);
+
 $collections = [
     'ksiazki-artystyczne' => [
         'label' => 'Książki Artystyczne',
@@ -113,7 +122,9 @@ while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
 }
 
 // Pobierz listy (do opcji i headera)
-$lists = $pdo->query("SELECT id, list_name FROM lists ORDER BY list_name")->fetchAll(PDO::FETCH_ASSOC);
+$listStmt = $pdo->prepare("SELECT id, list_name FROM lists WHERE collection = ? ORDER BY list_name");
+$listStmt->execute([$selectedCollection]);
+$lists = $listStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Domyślne kolumny (wspólne ustawienie między podstronami)
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
@@ -273,7 +284,7 @@ function handleListSelection(select, entryId) {
             fetch('add_list.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newListName, entry_id: entryId })
+                body: JSON.stringify({ name: newListName, entry_id: entryId, collection: selectedCollection })
             })
             .then(response => response.json())
             .then(data => {
@@ -289,7 +300,7 @@ function handleListSelection(select, entryId) {
         fetch('add_to_list.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ list_id: selectedValue, entry_id: entryId })
+            body: JSON.stringify({ list_id: selectedValue, entry_id: entryId, collection: selectedCollection })
         })
         .then(response => response.json())
         .then(data => {
