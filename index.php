@@ -9,6 +9,9 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
+$username = $_SESSION['username'] ?? '';
+
+
 include 'db.php';
 
 // AJAX: pobieranie wierszy
@@ -115,7 +118,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
 
 </div>
 
-<a role="button" href="logout.php" class="back-link" id="toggleButton">Wyloguj się</a>
+<a role="button" href="logout.php" class="back-link" id="toggleButton">Wyloguj się <?php echo htmlspecialchars($username); ?></a>
         </div>
     </div>
 <div class="header-links-left">
