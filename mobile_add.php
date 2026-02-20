@@ -257,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? (int)$new_data[$primaryKeyColumn]
             : (int)$pdo->lastInsertId();
 
-        header('Location: karta.php?id=' . $newId . '&collection=' . urlencode($selectedCollection));
+        header('Location: karta.php?id=' . $newId . '&collection=' . urlencode($selectedCollection) . '&from_mobile_add=1');
         exit;
     } catch (PDOException $e) {
         $formError = 'Błąd dodawania: ' . $e->getMessage();

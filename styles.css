@@ -156,6 +156,24 @@ button,
     font-size: 12px;
 }
 
+
+.mobile-next-button {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 16px 26px;
+    font-size: 28px;
+    font-weight: bold;
+    text-transform: uppercase;
+    text-decoration: none;
+    background-color: #0a9b32;
+    color: #fff;
+    border-radius: 12px;
+}
+
+.mobile-next-button:hover {
+    background-color: #067324;
+}
+
 button:hover,
 #toggleButton:hover,
 #toggleColumndButton:hover,
