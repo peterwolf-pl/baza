@@ -66,9 +66,17 @@ if (!$row) {
 }
 
 // Pobranie ścieżki obrazka
-$image_path = !empty($row['dokumentacja_wizualna']) 
-    ? 'https://mkalodz.pl/bazagfx/' . htmlspecialchars(str_replace("'", "", $row['dokumentacja_wizualna']))
-    : null;
+$image_path = null;
+if (!empty($row['dokumentacja_wizualna'])) {
+    $rawImageValue = trim((string)$row['dokumentacja_wizualna']);
+
+    if (preg_match('#^https?://#i', $rawImageValue) === 1 || str_starts_with($rawImageValue, '/')) {
+        $image_path = $rawImageValue;
+    } else {
+        $safeImageName = basename($rawImageValue);
+        $image_path = '/gfx/' . rawurlencode($safeImageName);
+    }
+}
 
 function ensureMoveUsernameColumn(PDO $pdo, string $movesTable): bool {
     try {
@@ -268,7 +276,15 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
         <?php foreach ($row as $key => $value): ?>
             <tr>
                 <th width="300px"><?= htmlspecialchars($key) ?></th>
-                <td><?= htmlspecialchars($value) ?></td>
+                <td>
+                    <?php if ($key === 'dokumentacja_wizualna' && $image_path): ?>
+                        <a href="<?= htmlspecialchars($image_path) ?>" target="_blank" rel="noopener noreferrer">
+                            <?= htmlspecialchars((string)$value) ?>
+                        </a>
+                    <?php else: ?>
+                        <?= htmlspecialchars($value) ?>
+                    <?php endif; ?>
+                </td>
             </tr>
         <?php endforeach; ?>
         <?php if ($image_path): ?>

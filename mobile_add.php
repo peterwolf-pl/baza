@@ -132,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $photoName = null;
         if (isset($_FILES['mobile_photo']) && $_FILES['mobile_photo']['error'] === UPLOAD_ERR_OK) {
-            $uploadDir = __DIR__ . '/uploads/mobile';
+            $uploadDir = __DIR__ . '/gfx';
             if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0775, true);
             }
