@@ -30,9 +30,22 @@ $image_path = !empty($row['dokumentacja_wizualna'])
     ? 'https://mkalodz.pl/bazagfx/' . htmlspecialchars(str_replace("'", "", $row['dokumentacja_wizualna']))
     : null;
 
-$moveTableColumns = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna_przemieszczenia")
-    ->fetchAll(PDO::FETCH_COLUMN);
-$hasMoveUsernameColumn = in_array('user_username', $moveTableColumns, true);
+function ensureMoveUsernameColumn(PDO $pdo): bool {
+    try {
+        $moveTableColumns = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna_przemieszczenia")
+            ->fetchAll(PDO::FETCH_COLUMN);
+
+        if (!in_array('user_username', $moveTableColumns, true)) {
+            $pdo->exec("ALTER TABLE karta_ewidencyjna_przemieszczenia ADD COLUMN user_username VARCHAR(255) NULL");
+        }
+
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+$hasMoveUsernameColumn = ensureMoveUsernameColumn($pdo);
 
 function getNextPrzemieszczenieNumber(PDO $pdo): string {
     $stmt = $pdo->query(
