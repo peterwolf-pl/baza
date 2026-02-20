@@ -248,7 +248,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     </table>
 
     <!-- Tabela Edycji Karty -->
-    <button id="toggleEditKartaButton" onclick="toggleEditKarta()">Pokaż/Ukryj tabelę edycji karty</button>
+    <button type="button" id="toggleEditKartaButton" onclick="toggleEditKarta()">Pokaż/Ukryj tabelę edycji karty</button>
     <div id="editKartaContainer">
         <h2>Edytuj Kartę</h2>
         <form method="post">
@@ -266,7 +266,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     </div>
 
     <!-- Tabela Historii Zmian -->
-    <button id="toggleLogButton" onclick="toggleLog()">Pokaż/Ukryj historię zmian</button>
+    <button type="button" id="toggleLogButton" onclick="toggleLog()">Pokaż/Ukryj historię zmian</button>
     <div id="logContainer">
         <h2>Historia Zmian</h2>
         <table>
@@ -294,7 +294,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     </div>
 
     <!-- Tabela Przemieszczeń -->
-    <button id="togglePrzemieszczeniaButton" onclick="togglePrzemieszczenia()">Pokaż/Ukryj tabelę przemieszczeń</button>
+    <button type="button" id="togglePrzemieszczeniaButton" onclick="togglePrzemieszczenia()">Pokaż/Ukryj tabelę przemieszczeń</button>
     <div id="przemieszczeniaContainer">
         <h2>Przemieszczenia</h2>
         <table>
@@ -362,17 +362,30 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     </div>
 
     <script>
+        function toggleContainer(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) {
+                return;
+            }
+
+            const isHidden = container.style.display === 'none' || container.style.display === '';
+            container.style.display = isHidden ? 'block' : 'none';
+
+            if (isHidden) {
+                container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
         function toggleEditKarta() {
-            const container = document.getElementById('editKartaContainer');
-            container.style.display = container.style.display === 'none' || container.style.display === '' ? 'block' : 'none';
+            toggleContainer('editKartaContainer');
         }
+
         function toggleLog() {
-            const container = document.getElementById('logContainer');
-            container.style.display = container.style.display === 'none' || container.style.display === '' ? 'block' : 'none';
+            toggleContainer('logContainer');
         }
+
         function togglePrzemieszczenia() {
-            const container = document.getElementById('przemieszczeniaContainer');
-            container.style.display = container.style.display === 'none' || container.style.display === '' ? 'block' : 'none';
+            toggleContainer('przemieszczeniaContainer');
         }
 
         window.addEventListener('DOMContentLoaded', () => {
