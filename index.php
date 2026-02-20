@@ -31,13 +31,13 @@ $collections = [
         'moves' => 'karta_ewidencyjna_przemieszczenia',
     ],
     'kolekcja-maszyn' => [
-        'label' => 'Kolekcja Maszyn',
+        'label' => 'Maszyny',
         'main' => 'karta_ewidencyjna_maszyny',
         'log' => 'karta_ewidencyjna_maszyny_log',
         'moves' => 'karta_ewidencyjna_maszyny_przemieszczenia',
     ],
     'kolekcja-matryc' => [
-        'label' => 'Kolekcja Matryc',
+        'label' => 'Matryce',
         'main' => 'karta_ewidencyjna_matryce',
         'log' => 'karta_ewidencyjna_matryce_log',
         'moves' => 'karta_ewidencyjna_matryce_przemieszczenia',
@@ -196,7 +196,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
     <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     
     <a role="button" id="toggleButton" href="neww.php?collection=<?php echo urlencode($selectedCollection); ?>">Nowy Wpis</a> 
-    <a role="button" id="toggleButton" href="mobile_add.php?collection=<?php echo urlencode($selectedCollection); ?>">mobile add</a> 
+    <a role="button" id="toggleButton" href="mobile_add.php?collection=<?php echo urlencode($selectedCollection); ?>">Fast Mobile Adder</a> 
     <a role="button" id="toggleButton" href="search.php?collection=<?php echo urlencode($selectedCollection); ?>">Szukaj</a>
    
  </div>

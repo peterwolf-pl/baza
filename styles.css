@@ -60,9 +60,10 @@ h5 {
 .collection-switcher {
     display: inline-flex;
     align-items: center;
+    margin-top: 10px;
     gap: 8px;
     padding: 8px 12px;
-    margin-bottom: 10px;
+    margin-bottom: 0px;
     border-radius: 12px;
     background-color: #bbb;
 }
@@ -73,7 +74,8 @@ h5 {
 
 .collection-switcher #toggleButton:hover,
 .collection-switcher #toggleButton.active {
-    background-color: #222;
+    background-color: #027bff;
+    font-weight: bold;
 }
 
 .header-links a {

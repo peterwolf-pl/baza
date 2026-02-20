@@ -67,14 +67,22 @@ if (!$row) {
 
 // Pobranie ścieżki obrazka
 $image_path = null;
+$image_fallback_path = null;
 if (!empty($row['dokumentacja_wizualna'])) {
     $rawImageValue = trim((string)$row['dokumentacja_wizualna']);
+    $normalizedImageValue = trim($rawImageValue, " '\"");
 
-    if (preg_match('#^https?://#i', $rawImageValue) === 1 || str_starts_with($rawImageValue, '/')) {
-        $image_path = $rawImageValue;
-    } else {
-        $safeImageName = basename($rawImageValue);
-        $image_path = '/gfx/' . rawurlencode($safeImageName);
+    if ($normalizedImageValue !== '') {
+        if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
+            $image_path = $normalizedImageValue;
+        } else {
+            $relativeImagePath = ltrim($normalizedImageValue, '/');
+            $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
+            $encodedPath = implode('/', $encodedSegments);
+
+            $image_path = 'https://baza.mkal.pl/gfx/' . $encodedPath;
+            $image_fallback_path = 'https://mkalodz.pl/bazagfx/' . $encodedPath;
+        }
     }
 }
 
@@ -290,7 +298,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
         <?php if ($image_path): ?>
             <tr>
                 <td colspan="2">
-                    <img src="<?= $image_path ?>" alt="Obrazek obiektu" width="600">
+                    <img src="<?= htmlspecialchars($image_path) ?>" alt="Obrazek obiektu" width="600"<?php if ($image_fallback_path): ?> onerror='if (this.src !== <?= json_encode($image_fallback_path) ?>) this.src = <?= json_encode($image_fallback_path) ?>;'<?php endif; ?>>
                 </td>
             </tr>
         <?php endif; ?>
