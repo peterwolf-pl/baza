@@ -1,13 +1,19 @@
+@font-face {
+    font-family: 'GrohmanGrotesk';
+    src: url('gg.woff2') format('woff2');
+    font-display: swap;
+}
+
 /* Global base styles (from index.php) */
-body { font-family: Arial, sans-serif; padding: 20px; }
-.column-selector, .data-table { margin-top: 20px; }
+body { font-family: Arial, sans-serif; padding: 10px; }
+.column-selector, .data-table { margin-top: 10px; }
 .column-selector label { display: block; }
 .data-table table { border-collapse: collapse; width: 100%; }
 .data-table th, .data-table td { border: 1px solid #ddd; padding: 8px; }
 .data-table th { background-color: #f2f2f2; }
-.header-low { float: right; margin-top: 20px; background-color: #bbb; padding: 8px 16px; border-radius: 15px; }
-.header-links { float: right; margin-top: 20px; }
-.header-links-left { float: left; margin-top: 20px; }
+.header-low { float: right; margin-top: 10px; background-color: #bbb; padding: 8px 16px; border-radius: 15px; }
+.header-links { float: right; margin-top: 10px; }
+.header-links-left { float: left; margin-bottom: 20px; }
 .header-links a { margin-left: 15px; text-decoration: none; color: #fff; }
 .header-links a:hover { text-decoration: underline; color: #000; }
 #columnSelectorContainer { display: none; padding: 10px; border: 1px solid #000; background-color: #f9f9f9; }
@@ -31,7 +37,7 @@ body { font-family: Arial, sans-serif; padding: 20px; }
 #toggleColumndButton:focus { outline: none; }
 
 /* Page-specific additions from other PHP files */
-.header { display: flex; align-items: center; gap: 16px; }
+.header { display: flex; align-items: center; gap: 6px; }
 .header .header-links { margin-left: auto; display: flex; align-items: center; gap: 12px; float: none; margin-top: 0; }
 .header .header-links a { color: #007BFF; font-weight: bold; margin-left: 0; }
 .bulk-bar { display: inline-flex; align-items: center; gap: 8px; }
@@ -90,8 +96,7 @@ button:focus { outline: none; }
 .footer-right a:hover { text-decoration: underline; }
 
 h1, h2, h3 {
-    font-family: GrohmanGrotesk;
-    src: url('/gg.woff2') format('woff2');
+    font-family: 'GrohmanGrotesk', Arial, sans-serif;
 }
 
 .lists-table, .entries-table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
