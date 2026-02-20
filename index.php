@@ -14,6 +14,48 @@ $username = $_SESSION['username'] ?? '';
 
 include 'db.php';
 
+function ensureListsCollectionColumn(PDO $pdo): void {
+    $columns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);
+    if (!in_array('collection', $columns, true)) {
+        $pdo->exec("ALTER TABLE lists ADD COLUMN collection VARCHAR(64) NOT NULL DEFAULT 'ksiazki-artystyczne'");
+    }
+}
+
+ensureListsCollectionColumn($pdo);
+
+$collections = [
+    'ksiazki-artystyczne' => [
+        'label' => 'Książki Artystyczne',
+        'main' => 'karta_ewidencyjna',
+        'log' => 'karta_ewidencyjna_log',
+        'moves' => 'karta_ewidencyjna_przemieszczenia',
+    ],
+    'kolekcja-maszyn' => [
+        'label' => 'Kolekcja Maszyn',
+        'main' => 'karta_ewidencyjna_maszyny',
+        'log' => 'karta_ewidencyjna_maszyny_log',
+        'moves' => 'karta_ewidencyjna_maszyny_przemieszczenia',
+    ],
+    'kolekcja-matryc' => [
+        'label' => 'Kolekcja Matryc',
+        'main' => 'karta_ewidencyjna_matryce',
+        'log' => 'karta_ewidencyjna_matryce_log',
+        'moves' => 'karta_ewidencyjna_matryce_przemieszczenia',
+    ],
+    'biblioteka' => [
+        'label' => 'Biblioteka',
+        'main' => 'karta_ewidencyjna_bib',
+        'log' => 'karta_ewidencyjna_bib_log',
+        'moves' => 'karta_ewidencyjna_bib_przemieszczenia',
+    ],
+];
+
+$selectedCollection = $_GET['collection'] ?? 'ksiazki-artystyczne';
+if (!isset($collections[$selectedCollection])) {
+    $selectedCollection = 'ksiazki-artystyczne';
+}
+$mainTable = $collections[$selectedCollection]['main'];
+
 // AJAX: pobieranie wierszy
 if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
     $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
@@ -22,13 +64,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
     try {
         // Pobierz kolumny
         $columns = [];
-        $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
+        $query = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
         while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
             $columns[] = $row['Field'];
         }
 
         // !!! UWAGA: w MySQL nie używaj bindValue do LIMIT/OFFSET !!!
-        $stmt = $pdo->query("SELECT * FROM karta_ewidencyjna LIMIT $offset, $limit");
+        $stmt = $pdo->query("SELECT * FROM {$mainTable} LIMIT $offset, $limit");
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         header('Content-Type: application/json');
@@ -60,7 +102,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
     $requested = (isset($data['visible_columns']) && is_array($data['visible_columns'])) ? $data['visible_columns'] : [];
 
     $columns = [];
-    $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
+    $query = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
     while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
         $columns[] = $row['Field'];
     }
@@ -74,13 +116,15 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
 
 // Pobierz kolumny do headera
 $columns = [];
-$query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
+$query = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
 while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
     $columns[] = $row['Field'];
 }
 
 // Pobierz listy (do opcji i headera)
-$lists = $pdo->query("SELECT id, list_name FROM lists ORDER BY list_name")->fetchAll(PDO::FETCH_ASSOC);
+$listStmt = $pdo->prepare("SELECT id, list_name FROM lists WHERE collection = ? ORDER BY list_name");
+$listStmt->execute([$selectedCollection]);
+$lists = $listStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Domyślne kolumny (wspólne ustawienie między podstronami)
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
@@ -108,11 +152,11 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
  
 
 <div class="header-low">
-    <a role="button" id="toggleButton" href="lists.php">Edytor list</a>
+    <a role="button" id="toggleButton" href="lists.php?collection=<?php echo urlencode($selectedCollection); ?>">Edytor list</a>
 <strong>Listy:</strong>
             <?php
             foreach ($lists as $list) {
-                echo "<a href='list_view.php?list_id={$list['id']}'>{$list['list_name']}</a> &nbsp; ";
+                echo "<a href='list_view.php?list_id={$list['id']}&collection=" . urlencode($selectedCollection) . "'>{$list['list_name']}</a> &nbsp; ";
             }
             ?>
 
@@ -122,11 +166,20 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
         </div>
     </div>
 <div class="header-links-left">
+    <div class="collection-switcher">
+        <strong>Kolekcje:</strong>
+        <?php foreach ($collections as $collectionKey => $collection): ?>
+            <a role="button" id="toggleButton" href="?collection=<?php echo urlencode($collectionKey); ?>" class="<?php echo $selectedCollection === $collectionKey ? 'active' : ''; ?>">
+                <?php echo htmlspecialchars($collection['label']); ?>
+            </a>
+        <?php endforeach; ?>
+    </div>
+
     <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     
-    <a role="button" id="toggleButton" href="neww.php">Nowy Wpis</a> 
+    <a role="button" id="toggleButton" href="neww.php?collection=<?php echo urlencode($selectedCollection); ?>">Nowy Wpis</a> 
     
-    <a role="button" id="toggleButton" href="search.php">Szukaj</a>
+    <a role="button" id="toggleButton" href="search.php?collection=<?php echo urlencode($selectedCollection); ?>">Szukaj</a>
    
  </div>
     <div id="columnSelectorContainer" class="column-selector">
@@ -163,6 +216,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
 <script>
 // przekazanie PHP -> JS dla opcji list
 const phpLists = <?php echo json_encode($lists); ?>;
+const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
 // Kolumny widoczne na start
 const defaultVisibleColumns = <?php echo json_encode($selectedColumns); ?>;
@@ -186,7 +240,7 @@ function persistVisibleColumns() {
         visibleColumns.push(cb.value);
     });
 
-    fetch('?action=save_visible_columns', {
+    fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=save_visible_columns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ visible_columns: visibleColumns })
@@ -230,7 +284,7 @@ function handleListSelection(select, entryId) {
             fetch('add_list.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newListName, entry_id: entryId })
+                body: JSON.stringify({ name: newListName, entry_id: entryId, collection: selectedCollection })
             })
             .then(response => response.json())
             .then(data => {
@@ -246,7 +300,7 @@ function handleListSelection(select, entryId) {
         fetch('add_to_list.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ list_id: selectedValue, entry_id: entryId })
+            body: JSON.stringify({ list_id: selectedValue, entry_id: entryId, collection: selectedCollection })
         })
         .then(response => response.json())
         .then(data => {
@@ -280,7 +334,7 @@ function loadRows() {
     if (loading || noMoreRows) return;
     loading = true;
 
-    fetch(`?action=fetch_rows&offset=${offset}`)
+    fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=fetch_rows&offset=${offset}`)
         .then(async response => {
             if (!response.ok) {
                 const text = await response.text();
@@ -324,7 +378,7 @@ function loadRows() {
                 // użyj klucza ID lub id (wykryj automatycznie)
                 const idField = row['ID'] !== undefined ? 'ID' : (row['id'] !== undefined ? 'id' : columns[0]);
                 tdOptions.innerHTML = `
-                    <a role="button" id="toggleButton" href="karta.php?id=${row[idField]}">Karta</a>
+                    <a role="button" id="toggleButton" href="karta.php?id=${row[idField]}&collection=${encodeURIComponent(selectedCollection)}">Karta</a>
                     <select onchange="handleListSelection(this, ${row[idField]})">
                         ${getListOptionsHtml()}
                     </select>

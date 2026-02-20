@@ -57,6 +57,25 @@ h5 {
     margin-bottom: 20px;
 }
 
+.collection-switcher {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border-radius: 12px;
+    background-color: #bbb;
+}
+
+.collection-switcher #toggleButton {
+    background-color: #000;
+}
+
+.collection-switcher #toggleButton:hover,
+.collection-switcher #toggleButton.active {
+    background-color: #222;
+}
+
 .header-links a {
     margin-left: 15px;
     text-decoration: none;

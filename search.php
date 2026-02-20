@@ -6,13 +6,34 @@ error_reporting(E_ALL);
 
 include 'db.php';
 
+
+$collections = [
+    'ksiazki-artystyczne' => 'karta_ewidencyjna',
+    'kolekcja-maszyn' => 'karta_ewidencyjna_maszyny',
+    'kolekcja-matryc' => 'karta_ewidencyjna_matryce',
+    'biblioteka' => 'karta_ewidencyjna_bib',
+];
+
+$selectedCollection = $_GET['collection'] ?? ($_POST['collection'] ?? 'ksiazki-artystyczne');
+if (!isset($collections[$selectedCollection])) {
+    $selectedCollection = 'ksiazki-artystyczne';
+}
+$mainTable = $collections[$selectedCollection];
+
+$listColumns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);
+if (!in_array('collection', $listColumns, true)) {
+    $pdo->exec("ALTER TABLE lists ADD COLUMN collection VARCHAR(64) NOT NULL DEFAULT 'ksiazki-artystyczne'");
+}
+
 // Dynamicznie pobierz kolumny
 $columns = [];
-$query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
+$query = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
 while ($row = $query->fetch(PDO::FETCH_ASSOC)) { $columns[] = $row['Field']; }
 
 // Pobierz listy
-$lists = $pdo->query("SELECT id, list_name FROM lists ORDER BY list_name")->fetchAll(PDO::FETCH_ASSOC);
+$listsStmt = $pdo->prepare("SELECT id, list_name FROM lists WHERE collection = ? ORDER BY list_name");
+$listsStmt->execute([$selectedCollection]);
+$lists = $listsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Domyślne widoczne kolumny
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
@@ -115,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     }
 
     $where_clause = implode(' OR ', $where);
-    $stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna WHERE $where_clause LIMIT 100");
+    $stmt = $pdo->prepare("SELECT * FROM {$mainTable} WHERE $where_clause LIMIT 100");
     $stmt->execute($params);
     $search_results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -133,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
         $_SESSION['search_states'] = array_slice($_SESSION['search_states'], -20, null, true);
     }
 
-    header('Location: search.php?state=' . urlencode($search_state_id));
+    header('Location: search.php?collection=' . urlencode($selectedCollection) . '&state=' . urlencode($search_state_id));
     exit;
 }
 ?>
@@ -146,6 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     <script>
         // kolumny widoczności
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
+        const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
         // globalny zbiór zaznaczeń z obu tabel
         const selectedIds = new Set();
@@ -270,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                     const res = await fetch('add_list.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: newListName })
+                        body: JSON.stringify({ name: newListName, collection: selectedCollection })
                     });
                     const data = await res.json();
                     if (!data.success || !data.id) {
@@ -293,7 +315,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                     fetch('add_to_list.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ list_id: listId, entry_id: id })
+                        body: JSON.stringify({ list_id: listId, entry_id: id, collection: selectedCollection })
                     }).then(r => r.json())
                 ));
                 toast('Dodano zaznaczone wpisy do listy');
@@ -319,7 +341,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                     fetch('add_list.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: newListName, entry_id: entryId })
+                        body: JSON.stringify({ name: newListName, entry_id: entryId, collection: selectedCollection })
                     })
                     .then(response => response.json())
                     .then(data => {
@@ -337,7 +359,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                 fetch('add_to_list.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ list_id: selectedValue, entry_id: entryId })
+                    body: JSON.stringify({ list_id: selectedValue, entry_id: entryId, collection: selectedCollection })
                 })
                 .then(response => response.json())
                 .then(data => {
@@ -370,7 +392,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
         <div class="header-links">
             <div class="header-low">
             <?php foreach ($lists as $list): ?>
-                <a href="list_view.php?list_id=<?php echo $list['id']; ?>"><?php echo htmlspecialchars($list['list_name']); ?></a>
+                <a href="list_view.php?list_id=<?php echo $list['id']; ?>&collection=<?php echo urlencode($selectedCollection); ?>"><?php echo htmlspecialchars($list['list_name']); ?></a>
             <?php endforeach; ?>
 </div>
 
@@ -398,12 +420,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
         </div>
     </div>
 
-    <a role="button" id="toggleButton" href="https://baza.mkal.pl">Powrót do strony głównej</a>
+    <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Powrót do strony głównej</a>
     <br><br>
 
     <!-- Wybór kolumn -->
     <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     <form id="columnSelectorContainer" class="column-selector" method="post" action="" onsubmit="suppressUnloadWarning = true;">
+        <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
         <?php foreach ($columns as $col): ?>
             <label>
                 <input type="checkbox" name="visible_columns[]" value="<?php echo $col; ?>"
@@ -419,6 +442,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
 
     <h2>Wyszukiwanie</h2>
     <form method="post" onsubmit="suppressUnloadWarning = true;">
+        <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
         <input type="text" name="query" value="<?php echo htmlspecialchars($query_string); ?>" required>
         <?php foreach ($selectedColumns as $col): ?>
             <input type="hidden" name="visible_columns[]" value="<?php echo $col; ?>">
@@ -464,7 +488,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                                 <?php endforeach; ?>
                                 <td class="no-highlight">
                                     <?php
-                                        $kartaHref = 'karta.php?id=' . urlencode((string)$entryId);
+                                        $kartaHref = 'karta.php?id=' . urlencode((string)$entryId) . '&collection=' . urlencode($selectedCollection);
                                         if ($search_state_id !== '') {
                                             $kartaHref .= '&search_return=' . urlencode('search.php?state=' . $search_state_id);
                                         }
