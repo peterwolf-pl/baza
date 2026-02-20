@@ -23,6 +23,35 @@ if (!isset($collections[$selectedCollection])) {
 
 $mainTable = $collections[$selectedCollection];
 
+
+function getPrimaryKeyColumn(PDO $pdo, string $table): ?string {
+    $stmt = $pdo->query("SHOW KEYS FROM {$table} WHERE Key_name = 'PRIMARY'");
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        if (!empty($row['Column_name'])) {
+            return $row['Column_name'];
+        }
+    }
+
+    return null;
+}
+
+function nextNumericValue(PDO $pdo, string $table, string $column): int {
+    $stmt = $pdo->query("SELECT COALESCE(MAX(CAST({$column} AS UNSIGNED)), 0) + 1 AS next_val FROM {$table}");
+    return (int)$stmt->fetchColumn();
+}
+
+function currentProcessingDate(PDO $pdo, string $table): string {
+    $stmt = $pdo->query("SHOW COLUMNS FROM {$table} LIKE 'data_opracowania'");
+    $column = $stmt->fetch(PDO::FETCH_ASSOC);
+    $type = strtolower((string)($column['Type'] ?? ''));
+
+    if (str_contains($type, 'datetime') || str_contains($type, 'timestamp')) {
+        return date('Y-m-d H:i:s');
+    }
+
+    return date('Y-m-d');
+}
+
 $valid_columns = [
             'numer_ewidencyjny', 'nazwa_tytul', 'czas_powstania', 'inne_numery_ewidencyjne',
             'autor_wytworca', 'miejsce_powstania', 'liczba', 'material', 
@@ -43,15 +72,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($valid_columns as $column) {
             if ($column === 'numer_ewidencyjny') {
                 // Automatyczne generowanie numeru ewidencyjnego (ostatni numer + 1)
-                $stmt = $pdo->query("SELECT IFNULL(MAX(numer_ewidencyjny), 0) AS max_num FROM {$mainTable}");
-                $result = $stmt->fetch(PDO::FETCH_ASSOC);
-                $new_data[$column] = $result['max_num'] + 1;
+                $new_data[$column] = nextNumericValue($pdo, $mainTable, 'numer_ewidencyjny');
             } elseif ($column === 'data_opracowania') {
                 // Ustawienie aktualnej daty
-                $new_data[$column] = date('Y-m-d');
+                $new_data[$column] = currentProcessingDate($pdo, $mainTable);
             } else {
-                $new_data[$column] = $_POST[$column] ?? null;
+                if ($column === 'opracowujacy') {
+                    $new_data[$column] = $_SESSION['username'] ?? ($_POST[$column] ?? null);
+                } else {
+                    $new_data[$column] = $_POST[$column] ?? null;
+                }
             }
+        }
+
+        $primaryKeyColumn = getPrimaryKeyColumn($pdo, $mainTable);
+        if ($primaryKeyColumn !== null && !array_key_exists($primaryKeyColumn, $new_data)) {
+            $new_data[$primaryKeyColumn] = nextNumericValue($pdo, $mainTable, $primaryKeyColumn);
         }
 
         // Tworzenie zapytania SQL
@@ -62,7 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $insert_stmt->execute($new_data);
 
         // Przeładuj stronę lub przekieruj do nowo utworzonego wpisu
-        header("Location: karta.php?id=" . $pdo->lastInsertId() . "&collection=" . urlencode($selectedCollection));
+        $newId = isset($primaryKeyColumn, $new_data[$primaryKeyColumn]) ? (int)$new_data[$primaryKeyColumn] : (int)$pdo->lastInsertId();
+        header("Location: karta.php?id=" . $newId . "&collection=" . urlencode($selectedCollection));
         exit;
     } catch (PDOException $e) {
         echo "Błąd dodawania: " . $e->getMessage();

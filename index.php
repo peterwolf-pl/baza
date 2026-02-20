@@ -69,14 +69,31 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
             $columns[] = $row['Field'];
         }
 
+        // Pobierz nazwę kolumny klucza głównego (na różnych kolekcjach może się różnić)
+        $primaryKeyColumn = null;
+        $pkStmt = $pdo->query("SHOW KEYS FROM {$mainTable} WHERE Key_name = 'PRIMARY'");
+        while ($pkRow = $pkStmt->fetch(PDO::FETCH_ASSOC)) {
+            if (!empty($pkRow['Column_name'])) {
+                $primaryKeyColumn = $pkRow['Column_name'];
+                break;
+            }
+        }
+
         // !!! UWAGA: w MySQL nie używaj bindValue do LIMIT/OFFSET !!!
-        $stmt = $pdo->query("SELECT * FROM {$mainTable} LIMIT $offset, $limit");
+        $selectSql = "SELECT * FROM {$mainTable}";
+        if ($primaryKeyColumn !== null) {
+            $selectSql .= ", {$primaryKeyColumn} AS __row_id";
+        }
+        $selectSql .= " LIMIT $offset, $limit";
+
+        $stmt = $pdo->query($selectSql);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         header('Content-Type: application/json');
         echo json_encode([
             'rows' => $rows,
-            'columns' => $columns
+            'columns' => $columns,
+            'primary_key' => $primaryKeyColumn
         ]);
     } catch (Exception $e) {
         http_response_code(500);
@@ -338,23 +355,20 @@ function getListOptionsHtml() {
     return html;
 }
 
-function getRowId(row, columns) {
-    const normalizedKeys = Object.keys(row).map(key => ({
-        original: key,
-        normalized: key.trim().toLowerCase()
-    }));
+function getRowId(row, columns, primaryKeyColumn) {
+    if (row['__row_id'] !== undefined && row['__row_id'] !== null && row['__row_id'] !== '') {
+        return Number.parseInt(row['__row_id'], 10);
+    }
 
-    const directIdKey = normalizedKeys.find(item => item.normalized === 'id');
+    if (primaryKeyColumn && row[primaryKeyColumn] !== undefined && row[primaryKeyColumn] !== null && row[primaryKeyColumn] !== '') {
+        return Number.parseInt(row[primaryKeyColumn], 10);
+    }
+
+    const directIdKey = Object.keys(row).find(key => key && key.trim().toLowerCase() === 'id');
     if (directIdKey) {
-        return Number.parseInt(row[directIdKey.original], 10);
+        return Number.parseInt(row[directIdKey], 10);
     }
 
-    const idColumn = columns.find(col => (col || '').trim().toLowerCase() === 'id');
-    if (idColumn && row[idColumn] !== undefined && row[idColumn] !== null && row[idColumn] !== '') {
-        return Number.parseInt(row[idColumn], 10);
-    }
-
-    // fallback: pierwszy zwracany klucz (zachowanie zgodne z wcześniejszą wersją)
     if (Array.isArray(columns) && columns.length > 0) {
         const firstColumn = columns[0];
         if (row[firstColumn] !== undefined && row[firstColumn] !== null && row[firstColumn] !== '') {
@@ -364,6 +378,7 @@ function getRowId(row, columns) {
 
     return NaN;
 }
+
 
 
 function loadRows() {
@@ -390,6 +405,7 @@ function loadRows() {
             const tableBody = document.getElementById('tableBody');
             const columns = data.columns;
             const rows = data.rows;
+            const primaryKeyColumn = data.primary_key || null;
 
             if (rows.length === 0) {
                 noMoreRows = true;
@@ -411,7 +427,7 @@ function loadRows() {
                 // Opcje
                 const tdOptions = document.createElement('td');
                 tdOptions.width = "222";
-                const rowId = getRowId(row, columns);
+                const rowId = getRowId(row, columns, primaryKeyColumn);
                 const hasValidRowId = Number.isInteger(rowId) && rowId > 0;
                 const entryIdForHandlers = hasValidRowId ? rowId : 0;
                 const kartaHref = hasValidRowId
