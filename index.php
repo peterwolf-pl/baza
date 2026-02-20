@@ -147,7 +147,14 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
 
         <div class="header-links">
 
-             
+             <div class="collection-switcher">
+        <strong>Kolekcje:</strong>
+        <?php foreach ($collections as $collectionKey => $collection): ?>
+            <a role="button" id="toggleButton" href="?collection=<?php echo urlencode($collectionKey); ?>" class="<?php echo $selectedCollection === $collectionKey ? 'active' : ''; ?>">
+                <?php echo htmlspecialchars($collection['label']); ?>
+            </a>
+        <?php endforeach; ?>
+    </div>    
 
  
 
@@ -166,14 +173,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
         </div>
     </div>
 <div class="header-links-left">
-    <div class="collection-switcher">
-        <strong>Kolekcje:</strong>
-        <?php foreach ($collections as $collectionKey => $collection): ?>
-            <a role="button" id="toggleButton" href="?collection=<?php echo urlencode($collectionKey); ?>" class="<?php echo $selectedCollection === $collectionKey ? 'active' : ''; ?>">
-                <?php echo htmlspecialchars($collection['label']); ?>
-            </a>
-        <?php endforeach; ?>
-    </div>
+
 
     <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     
