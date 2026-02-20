@@ -17,6 +17,57 @@ if (!$list_id) {
     exit;
 }
 
+$bulkMoveSuccess = null;
+$bulkMoveError = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszczenie'])) {
+    $dataPrzemieszczenia = trim($_POST['data_przemieszczenia'] ?? '');
+    $dataZwrotu = trim($_POST['data_zwrotu'] ?? '');
+    $numerPrzemieszczenia = trim($_POST['numer_przemieszczenia'] ?? '');
+    $miejscePrzemieszczenia = trim($_POST['miejsce_przemieszczenia'] ?? '');
+    $powodCelPrzemieszczenia = trim($_POST['powod_cel_przemieszczenia'] ?? '');
+
+    if ($dataPrzemieszczenia === '' || $numerPrzemieszczenia === '' || $miejscePrzemieszczenia === '') {
+        $bulkMoveError = 'Uzupełnij pola wymagane: data, numer i miejsce przemieszczenia.';
+    } else {
+        $entryIdsStmt = $pdo->prepare("SELECT DISTINCT entry_id FROM list_items WHERE list_id = ?");
+        $entryIdsStmt->execute([$list_id]);
+        $entryIds = $entryIdsStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (empty($entryIds)) {
+            $bulkMoveError = 'Ta lista nie zawiera pozycji do przemieszczenia.';
+        } else {
+            try {
+                $pdo->beginTransaction();
+                $insertStmt = $pdo->prepare(
+                    "INSERT INTO karta_ewidencyjna_przemieszczenia
+                    (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia)
+                    VALUES (?, ?, ?, ?, ?, ?)"
+                );
+
+                foreach ($entryIds as $entryId) {
+                    $insertStmt->execute([
+                        (int)$entryId,
+                        $dataPrzemieszczenia,
+                        $dataZwrotu !== '' ? $dataZwrotu : null,
+                        $numerPrzemieszczenia,
+                        $miejscePrzemieszczenia,
+                        $powodCelPrzemieszczenia !== '' ? $powodCelPrzemieszczenia : null
+                    ]);
+                }
+
+                $pdo->commit();
+                $bulkMoveSuccess = 'Dodano przemieszczenie do wszystkich pozycji z tej listy.';
+            } catch (PDOException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $bulkMoveError = 'Nie udało się dodać przemieszczeń: ' . $e->getMessage();
+            }
+        }
+    }
+}
+
 // Pobierz nazwy kolumn z tabeli
 $columns = [];
 $colsStmt = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
@@ -79,6 +130,11 @@ if (!$list) {
         .highlight { background: yellow; font-weight: bold; }
         .fuzzy-highlight { background: #bfffbf; font-weight: bold; }
         th.data-col, td.data-col { /* sterowane JSem przez display */ }
+        #bulkPrzemieszczenieContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-top: 15px; }
+        #toggleBulkPrzemieszczenieButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-top: 15px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
+        .bulk-form input, .bulk-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+        .message-success { color: #0a7d1a; font-weight: bold; margin-top: 10px; }
+        .message-error { color: #c40000; font-weight: bold; margin-top: 10px; }
     </style>
     <script>
         // przekazujemy wybrane kolumny do JS
@@ -113,7 +169,31 @@ if (!$list) {
             });
         }
 
-        window.addEventListener('DOMContentLoaded', updateColumnDisplay);
+        function toggleBulkPrzemieszczenieForm() {
+            const container = document.getElementById('bulkPrzemieszczenieContainer');
+            const button = document.getElementById('toggleBulkPrzemieszczenieButton');
+            const isHidden = window.getComputedStyle(container).display === 'none';
+            if (isHidden) {
+                container.style.display = 'block';
+                button.textContent = 'Ukryj formularz przemieszczenia listy';
+            } else {
+                container.style.display = 'none';
+                button.textContent = 'Dodaj przemieszczenie całej listy';
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            updateColumnDisplay();
+            const shouldOpenBulkForm = <?php echo json_encode($bulkMoveSuccess !== null || $bulkMoveError !== null); ?>;
+            if (shouldOpenBulkForm) {
+                const container = document.getElementById('bulkPrzemieszczenieContainer');
+                const button = document.getElementById('toggleBulkPrzemieszczenieButton');
+                if (container && button) {
+                    container.style.display = 'block';
+                    button.textContent = 'Ukryj formularz przemieszczenia listy';
+                }
+            }
+        });
 
         function handleListSelection(select, entryId) {
             const selectedValue = select.value;
@@ -250,8 +330,40 @@ if (!$list) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+
+            <button id="toggleBulkPrzemieszczenieButton" type="button" onclick="toggleBulkPrzemieszczenieForm()">Dodaj przemieszczenie całej listy</button>
+            <div id="bulkPrzemieszczenieContainer">
+                <h3>Nowe przemieszczenie dla całej listy</h3>
+                <form method="post" class="bulk-form">
+                    <input type="hidden" name="add_bulk_przemieszczenie" value="1">
+
+                    <label for="data_przemieszczenia">Data Przemieszczenia</label>
+                    <input type="date" name="data_przemieszczenia" id="data_przemieszczenia" required>
+
+                    <label for="data_zwrotu">Data Zwrotu</label>
+                    <input type="date" name="data_zwrotu" id="data_zwrotu">
+
+                    <label for="numer_przemieszczenia">Numer Przemieszczenia</label>
+                    <input type="text" name="numer_przemieszczenia" id="numer_przemieszczenia" required>
+
+                    <label for="miejsce_przemieszczenia">Miejsce Przemieszczenia</label>
+                    <input type="text" name="miejsce_przemieszczenia" id="miejsce_przemieszczenia" required>
+
+                    <label for="powod_cel_przemieszczenia">Powód/Cel Przemieszczenia</label>
+                    <textarea name="powod_cel_przemieszczenia" id="powod_cel_przemieszczenia"></textarea>
+
+                    <button type="submit">Dodaj</button>
+                </form>
+            </div>
         <?php else: ?>
             <p>Brak wpisów na tej liście.</p>
+        <?php endif; ?>
+
+        <?php if ($bulkMoveSuccess): ?>
+            <p class="message-success"><?php echo htmlspecialchars($bulkMoveSuccess); ?></p>
+        <?php endif; ?>
+        <?php if ($bulkMoveError): ?>
+            <p class="message-error"><?php echo htmlspecialchars($bulkMoveError); ?></p>
         <?php endif; ?>
     </div>
 
