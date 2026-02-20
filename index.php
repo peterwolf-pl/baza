@@ -148,6 +148,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
     $rawInput = file_get_contents('php://input');
     $data = json_decode($rawInput, true);
     $requested = (isset($data['visible_columns']) && is_array($data['visible_columns'])) ? $data['visible_columns'] : [];
+    $showThumbnailColumn = isset($data['show_thumbnail_column']) ? (bool)$data['show_thumbnail_column'] : true;
 
     $columns = [];
     $query = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
@@ -157,6 +158,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
 
     $selectedColumns = array_values(array_intersect($columns, $requested));
     $_SESSION['visible_columns'] = $selectedColumns;
+    $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
 
     echo json_encode(['success' => true]);
     exit;
@@ -179,6 +181,7 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
     ? array_values(array_intersect($columns, $_SESSION['visible_columns']))
     : $defaultVisibleColumns;
+$showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -231,6 +234,10 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
    
  </div>
     <div id="columnSelectorContainer" class="column-selector">
+        <label>
+            <input type="checkbox" id="thumbnailColumnCheckbox" onclick="toggleThumbnailColumn()" <?php echo $showThumbnailColumn ? 'checked' : ''; ?>>
+            Miniatura foto
+        </label>
         <?php foreach ($columns as $col): ?>
             <label>
                 <input type="checkbox" class="column-checkbox" value="<?php echo $col; ?>" 
@@ -245,7 +252,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
         <table id="dataTable">
             <thead>
                 <tr>
-                    <th>Miniatura foto</th>
+                    <th id="thumbnailHeader" class="thumbnail-col" style="display: <?php echo $showThumbnailColumn ? "" : "none"; ?>;">Miniatura foto</th>
                     <?php foreach ($columns as $col): ?>
                         <th class="<?php echo $col; ?>" 
                             style="display: <?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>;">
@@ -269,6 +276,7 @@ const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
 // Kolumny widoczne na start
 const defaultVisibleColumns = <?php echo json_encode($selectedColumns); ?>;
+let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
 let saveColumnsTimeout = null;
 
 function toggleColumnSelector() {
@@ -292,8 +300,25 @@ function persistVisibleColumns() {
     fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=save_visible_columns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visible_columns: visibleColumns })
+        body: JSON.stringify({ visible_columns: visibleColumns, show_thumbnail_column: showThumbnailColumn })
     }).catch(err => console.error('Błąd zapisu kolumn:', err));
+}
+
+function toggleThumbnailColumn() {
+    const checkbox = document.getElementById('thumbnailColumnCheckbox');
+    showThumbnailColumn = checkbox ? checkbox.checked : true;
+
+    const thumbnailHeader = document.getElementById('thumbnailHeader');
+    if (thumbnailHeader) {
+        thumbnailHeader.style.display = showThumbnailColumn ? '' : 'none';
+    }
+
+    document.querySelectorAll('td.thumbnail-col').forEach(cell => {
+        cell.style.display = showThumbnailColumn ? '' : 'none';
+    });
+
+    if (saveColumnsTimeout) clearTimeout(saveColumnsTimeout);
+    saveColumnsTimeout = setTimeout(persistVisibleColumns, 150);
 }
 
 function toggleColumn(column) {
@@ -448,7 +473,8 @@ function loadRows() {
                 const tr = document.createElement('tr');
 
                 const tdThumbnail = document.createElement('td');
-                tdThumbnail.classList.add('entry-thumbnail-cell');
+                tdThumbnail.classList.add('entry-thumbnail-cell', 'thumbnail-col');
+                tdThumbnail.style.display = showThumbnailColumn ? '' : 'none';
                 if (row.__thumbnail_url) {
                     const img = document.createElement('img');
                     img.classList.add('entry-thumbnail');
@@ -498,6 +524,8 @@ function loadRows() {
             loading = false;
         });
 }
+
+toggleThumbnailColumn();
 
 // Ładowanie początkowe
 loadRows();

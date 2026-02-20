@@ -180,6 +180,12 @@ $lists = $listsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Domyślne widoczne kolumny
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
+$showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
+
+if (isset($_POST['show_thumbnail_column'])) {
+    $showThumbnailColumn = $_POST['show_thumbnail_column'] === '1';
+    $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
+}
 
 // Przechwytywanie wyboru kolumn przez POST lub sesję (wspólne między podstronami)
 $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
@@ -269,6 +275,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
     <script>
         // przekazujemy wybrane kolumny do JS
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
+        let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
         const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
         function toggleColumnSelector() {
@@ -292,6 +299,9 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
         }
 
         function updateColumnDisplay() {
+            document.querySelectorAll('th.thumbnail-col, td.thumbnail-col').forEach(el => {
+                el.style.display = showThumbnailColumn ? '' : 'none';
+            });
             document.querySelectorAll('th.data-col').forEach(th => {
                 th.style.display = visibleColumns.includes(th.dataset.col) ? '' : 'none';
             });
@@ -429,6 +439,11 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
    
     <form id="columnSelectorContainer" class="column-selector" method="post" action="">
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
+        <input type="hidden" name="show_thumbnail_column" value="0">
+        <label>
+            <input type="checkbox" name="show_thumbnail_column" value="1" onclick="showThumbnailColumn=this.checked;updateColumnDisplay();" <?php echo $showThumbnailColumn ? 'checked' : ''; ?>>
+            Miniatura foto
+        </label>
         <?php foreach ($columns as $col): ?>
             <label>
                 <input type="checkbox" name="visible_columns[]" value="<?php echo $col; ?>"
@@ -445,7 +460,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
             <table>
                 <thead>
                     <tr>
-                        <th>Miniatura foto</th>
+                        <th class="thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">Miniatura foto</th>
                         <?php foreach ($columns as $col): ?>
                             <th class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">
                                 <?php echo htmlspecialchars($col); ?>
@@ -457,7 +472,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
                 <tbody>
                     <?php foreach ($entries as $row): ?>
                         <tr>
-                            <td class="entry-thumbnail-cell">
+                            <td class="entry-thumbnail-cell thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">
                                 <?php $thumbnailUrl = buildImageUrl($row['dokumentacja_wizualna'] ?? null); ?>
                                 <?php if ($thumbnailUrl !== null): ?>
                                     <img class="entry-thumbnail" src="<?php echo htmlspecialchars($thumbnailUrl); ?>" alt="Miniatura wpisu">
