@@ -41,6 +41,34 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
     exit;
 }
 
+
+// AJAX: zapisywanie wybranych kolumn z index.php
+if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
+    header('Content-Type: application/json');
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        echo json_encode(['success' => false, 'message' => 'Method not allowed']);
+        exit;
+    }
+
+    $rawInput = file_get_contents('php://input');
+    $data = json_decode($rawInput, true);
+    $requested = (isset($data['visible_columns']) && is_array($data['visible_columns'])) ? $data['visible_columns'] : [];
+
+    $columns = [];
+    $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
+    while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
+        $columns[] = $row['Field'];
+    }
+
+    $selectedColumns = array_values(array_intersect($columns, $requested));
+    $_SESSION['visible_columns'] = $selectedColumns;
+
+    echo json_encode(['success' => true]);
+    exit;
+}
+
 // Pobierz kolumny do headera
 $columns = [];
 $query = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
@@ -51,8 +79,11 @@ while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
 // Pobierz listy (do opcji i headera)
 $lists = $pdo->query("SELECT id, list_name FROM lists ORDER BY list_name")->fetchAll(PDO::FETCH_ASSOC);
 
-// Domyślne kolumny
+// Domyślne kolumny (wspólne ustawienie między podstronami)
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
+$selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
+    ? array_values(array_intersect($columns, $_SESSION['visible_columns']))
+    : $defaultVisibleColumns;
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -111,7 +142,7 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
             <label>
                 <input type="checkbox" class="column-checkbox" value="<?php echo $col; ?>" 
                        onclick="toggleColumn('<?php echo $col; ?>')" 
-                       <?php echo in_array($col, $defaultVisibleColumns) ? 'checked' : ''; ?>>
+                       <?php echo in_array($col, $selectedColumns) ? 'checked' : ''; ?>>
                 <?php echo $col; ?>
             </label>
         <?php endforeach; ?>
@@ -123,7 +154,7 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
                 <tr>
                     <?php foreach ($columns as $col): ?>
                         <th class="<?php echo $col; ?>" 
-                            style="display: <?php echo in_array($col, $defaultVisibleColumns) ? '' : 'none'; ?>;">
+                            style="display: <?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>;">
                             <?php echo $col; ?>
                         </th>
                     <?php endforeach; ?>
@@ -140,7 +171,8 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 const phpLists = <?php echo json_encode($lists); ?>;
 
 // Kolumny widoczne na start
-const defaultVisibleColumns = <?php echo json_encode($defaultVisibleColumns); ?>;
+const defaultVisibleColumns = <?php echo json_encode($selectedColumns); ?>;
+let saveColumnsTimeout = null;
 
 function toggleColumnSelector() {
     const container = document.getElementById('columnSelectorContainer');
@@ -154,6 +186,19 @@ function toggleColumnSelector() {
         button.textContent = 'Wybierz kolumny';
     }
 }
+function persistVisibleColumns() {
+    const visibleColumns = [];
+    document.querySelectorAll('input.column-checkbox:checked').forEach(cb => {
+        visibleColumns.push(cb.value);
+    });
+
+    fetch('?action=save_visible_columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visible_columns: visibleColumns })
+    }).catch(err => console.error('Błąd zapisu kolumn:', err));
+}
+
 function toggleColumn(column) {
     let header = document.querySelector(`th.${column}`);
     let cells = document.querySelectorAll(`td.${column}`);
@@ -162,6 +207,9 @@ function toggleColumn(column) {
     cells.forEach(cell => {
         cell.style.display = displayStyle;
     });
+
+    if (saveColumnsTimeout) clearTimeout(saveColumnsTimeout);
+    saveColumnsTimeout = setTimeout(persistVisibleColumns, 150);
 }
 
 // Dodawanie do list

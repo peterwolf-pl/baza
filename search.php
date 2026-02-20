@@ -24,9 +24,13 @@ $query_string = '';
 $levenshtein_distance = 2;
 
 // Przechwytywanie wyboru kolumn
-$selectedColumns = $defaultVisibleColumns;
+$selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
+    ? array_values(array_intersect($columns, $_SESSION['visible_columns']))
+    : $defaultVisibleColumns;
+
 if (isset($_POST['visible_columns']) && is_array($_POST['visible_columns'])) {
     $selectedColumns = array_values(array_intersect($columns, $_POST['visible_columns']));
+    $_SESSION['visible_columns'] = $selectedColumns;
 }
 
 /** Utils **/
