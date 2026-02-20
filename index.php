@@ -141,11 +141,11 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
  
 
 <div class="header-low">
-    <a role="button" id="toggleButton" href="lists.php">Edytor list</a>
+    <a role="button" id="toggleButton" href="lists.php?collection=<?php echo urlencode($selectedCollection); ?>">Edytor list</a>
 <strong>Listy:</strong>
             <?php
             foreach ($lists as $list) {
-                echo "<a href='list_view.php?list_id={$list['id']}'>{$list['list_name']}</a> &nbsp; ";
+                echo "<a href='list_view.php?list_id={$list['id']}&collection=" . urlencode($selectedCollection) . "'>{$list['list_name']}</a> &nbsp; ";
             }
             ?>
 
@@ -166,9 +166,9 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
 
     <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     
-    <a role="button" id="toggleButton" href="neww.php">Nowy Wpis</a> 
+    <a role="button" id="toggleButton" href="neww.php?collection=<?php echo urlencode($selectedCollection); ?>">Nowy Wpis</a> 
     
-    <a role="button" id="toggleButton" href="search.php">Szukaj</a>
+    <a role="button" id="toggleButton" href="search.php?collection=<?php echo urlencode($selectedCollection); ?>">Szukaj</a>
    
  </div>
     <div id="columnSelectorContainer" class="column-selector">
@@ -229,7 +229,7 @@ function persistVisibleColumns() {
         visibleColumns.push(cb.value);
     });
 
-    fetch('?action=save_visible_columns', {
+    fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=save_visible_columns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ visible_columns: visibleColumns })
@@ -323,7 +323,7 @@ function loadRows() {
     if (loading || noMoreRows) return;
     loading = true;
 
-    fetch(`?action=fetch_rows&offset=${offset}`)
+    fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=fetch_rows&offset=${offset}`)
         .then(async response => {
             if (!response.ok) {
                 const text = await response.text();
