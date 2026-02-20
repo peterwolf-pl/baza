@@ -17,18 +17,30 @@ if (!$list_id) {
     exit;
 }
 
+$moveTableColumns = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna_przemieszczenia")
+    ->fetchAll(PDO::FETCH_COLUMN);
+$hasMoveUsernameColumn = in_array('user_username', $moveTableColumns, true);
+
+function getNextPrzemieszczenieNumber(PDO $pdo): string {
+    $stmt = $pdo->query(
+        "SELECT COALESCE(MAX(CAST(numer_przemieszczenia AS UNSIGNED)), 0) + 1
+         FROM karta_ewidencyjna_przemieszczenia
+         WHERE numer_przemieszczenia REGEXP '^[0-9]+$'"
+    );
+    return (string)$stmt->fetchColumn();
+}
+
 $bulkMoveSuccess = null;
 $bulkMoveError = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszczenie'])) {
     $dataPrzemieszczenia = trim($_POST['data_przemieszczenia'] ?? '');
     $dataZwrotu = trim($_POST['data_zwrotu'] ?? '');
-    $numerPrzemieszczenia = trim($_POST['numer_przemieszczenia'] ?? '');
     $miejscePrzemieszczenia = trim($_POST['miejsce_przemieszczenia'] ?? '');
     $powodCelPrzemieszczenia = trim($_POST['powod_cel_przemieszczenia'] ?? '');
 
-    if ($dataPrzemieszczenia === '' || $numerPrzemieszczenia === '' || $miejscePrzemieszczenia === '') {
-        $bulkMoveError = 'Uzupełnij pola wymagane: data, numer i miejsce przemieszczenia.';
+    if ($dataPrzemieszczenia === '' || $miejscePrzemieszczenia === '') {
+        $bulkMoveError = 'Uzupełnij pola wymagane: data i miejsce przemieszczenia.';
     } else {
         $entryIdsStmt = $pdo->prepare("SELECT DISTINCT entry_id FROM list_items WHERE list_id = ?");
         $entryIdsStmt->execute([$list_id]);
@@ -39,25 +51,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszcze
         } else {
             try {
                 $pdo->beginTransaction();
-                $insertStmt = $pdo->prepare(
-                    "INSERT INTO karta_ewidencyjna_przemieszczenia
-                    (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia)
-                    VALUES (?, ?, ?, ?, ?, ?)"
-                );
+
+                $numerPrzemieszczenia = getNextPrzemieszczenieNumber($pdo);
+
+                if ($hasMoveUsernameColumn) {
+                    $insertStmt = $pdo->prepare(
+                        "INSERT INTO karta_ewidencyjna_przemieszczenia
+                        (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia, user_username)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)"
+                    );
+                } else {
+                    $insertStmt = $pdo->prepare(
+                        "INSERT INTO karta_ewidencyjna_przemieszczenia
+                        (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia)
+                        VALUES (?, ?, ?, ?, ?, ?)"
+                    );
+                }
 
                 foreach ($entryIds as $entryId) {
-                    $insertStmt->execute([
+                    $params = [
                         (int)$entryId,
                         $dataPrzemieszczenia,
                         $dataZwrotu !== '' ? $dataZwrotu : null,
                         $numerPrzemieszczenia,
                         $miejscePrzemieszczenia,
                         $powodCelPrzemieszczenia !== '' ? $powodCelPrzemieszczenia : null
-                    ]);
+                    ];
+
+                    if ($hasMoveUsernameColumn) {
+                        $params[] = $_SESSION['username'] ?? null;
+                    }
+
+                    $insertStmt->execute($params);
                 }
 
                 $pdo->commit();
-                $bulkMoveSuccess = 'Dodano przemieszczenie do wszystkich pozycji z tej listy.';
+                $bulkMoveSuccess = 'Dodano przemieszczenie nr ' . $numerPrzemieszczenia . ' do wszystkich pozycji z tej listy.';
             } catch (PDOException $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
@@ -109,6 +138,8 @@ if (!$list) {
     echo "Lista nie istnieje.";
     exit;
 }
+
+$nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -343,8 +374,8 @@ if (!$list) {
                     <label for="data_zwrotu">Data Zwrotu</label>
                     <input type="date" name="data_zwrotu" id="data_zwrotu">
 
-                    <label for="numer_przemieszczenia">Numer Przemieszczenia</label>
-                    <input type="text" name="numer_przemieszczenia" id="numer_przemieszczenia" required>
+                    <label for="numer_przemieszczenia">Numer Przemieszczenia (nadawany automatycznie)</label>
+                    <input type="text" id="numer_przemieszczenia" value="<?php echo htmlspecialchars($nextPrzemieszczeniaNumber); ?>" readonly>
 
                     <label for="miejsce_przemieszczenia">Miejsce Przemieszczenia</label>
                     <input type="text" name="miejsce_przemieszczenia" id="miejsce_przemieszczenia" required>
