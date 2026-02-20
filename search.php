@@ -19,9 +19,9 @@ $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 
 // Wyniki
 $search_results = [];
-$fuzzy_results = [];
 $query_string = '';
-$levenshtein_distance = 2;
+$has_search = false;
+$search_state_id = '';
 
 // Przechwytywanie wyboru kolumn
 $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
@@ -52,140 +52,89 @@ function normalizeText($text) {
     $t = asciiFold($t);
     return $t;
 }
-function minLevenshteinSubstr($haystack, $needle) {
-    $h = normalizeText($haystack);
-    $n = normalizeText($needle);
-    $lenN = strlen($n);
-    if ($lenN === 0) return 0;
-    $lenH = strlen($h);
-    if ($lenH === 0) return $lenN;
-    $min = PHP_INT_MAX;
-
-    // tokeny alfanumeryczne
-    $tokens = preg_split('/[^a-z0-9]+/i', $h, -1, PREG_SPLIT_NO_EMPTY);
-    foreach ($tokens as $tok) {
-        $lt = strlen($tok);
-        if ($lt === 0) continue;
-        if ($lt >= $lenN) {
-            for ($i = 0; $i <= $lt - $lenN; $i++) {
-                $sub = substr($tok, $i, $lenN);
-                $d = levenshtein($sub, $n);
-                if ($d < $min) $min = $d;
-                if ($min === 0) return 0;
-            }
-        } else {
-            $d = levenshtein($tok, $n);
-            if ($d < $min) $min = $d;
-        }
+function normalizeSearchQuery($text) {
+    $t = normalizeText($text);
+    $t = preg_replace('/[^a-z0-9\s]+/', ' ', $t);
+    $t = preg_replace('/\s+/', ' ', $t);
+    return trim($t);
+}
+function sqlFoldExpr($field) {
+    $expr = "LOWER(CAST($field AS CHAR))";
+    $map = [
+        'ą' => 'a', 'ć' => 'c', 'ę' => 'e', 'ł' => 'l', 'ń' => 'n',
+        'ó' => 'o', 'ś' => 's', 'ż' => 'z', 'ź' => 'z'
+    ];
+    foreach ($map as $from => $to) {
+        $expr = "REPLACE($expr, '$from', '$to')";
     }
-    // sliding window
-    if ($lenH >= $lenN) {
-        for ($i = 0; $i <= $lenH - $lenN; $i++) {
-            $sub = substr($h, $i, $lenN);
-            $d = levenshtein($sub, $n);
-            if ($d < $min) $min = $d;
-            if ($min === 0) return 0;
-        }
-    }
-    return $min === PHP_INT_MAX ? $lenN : $min;
+    return $expr;
+}
+if (!isset($_SESSION['search_states']) || !is_array($_SESSION['search_states'])) {
+    $_SESSION['search_states'] = [];
 }
 
-/** Budowa kandydatów fuzzy z progresywnym prefiksem **/
-function fetchFuzzyCandidates(PDO $pdo, array $fields, string $q_like): array {
-    $q_like = normalizeForLike($q_like);
-    $len = mb_strlen($q_like, 'UTF-8');
-    $lengths = [];
-    if ($len >= 4) { $lengths = [4,3,2,1]; }
-    elseif ($len === 3) { $lengths = [3,2,1]; }
-    elseif ($len === 2) { $lengths = [2,1]; }
-    else { $lengths = [1]; }
-
-    foreach ($lengths as $L) {
-        $prefix = mb_substr($q_like, 0, $L, 'UTF-8');
-        $like = ($L >= 3) ? ($prefix . '%') : ('%' . $prefix . '%');
-
-        $conds = [];
-        $params = [];
-        foreach ($fields as $ff) {
-            $conds[] = "LOWER(CAST($ff AS CHAR)) LIKE ?";
-            $params[] = $like;
+if (isset($_GET['state'])) {
+    $search_state_id = (string)$_GET['state'];
+    if (isset($_SESSION['search_states'][$search_state_id])) {
+        $state = $_SESSION['search_states'][$search_state_id];
+        $query_string = (string)($state['query_string'] ?? '');
+        $search_results = is_array($state['search_results'] ?? null) ? $state['search_results'] : [];
+        $state_columns = is_array($state['selected_columns'] ?? null) ? $state['selected_columns'] : [];
+        if (!empty($state_columns)) {
+            $selectedColumns = array_values(array_intersect($columns, $state_columns));
         }
-        if (!$conds) { break; }
-
-        $limit = ($L >= 3) ? 1500 : (($L === 2) ? 800 : 300);
-        $sql = "SELECT * FROM karta_ewidencyjna WHERE (" . implode(' OR ', $conds) . ") LIMIT " . (int)$limit;
-        $st = $pdo->prepare($sql);
-        $st->execute($params);
-        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-        if (!empty($rows)) return $rows;
+        $has_search = true;
     }
-
-    // fallback
-    $hasIdUpper = false;
-    try {
-        $st = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
-        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
-            if (strcasecmp($r['Field'], 'ID') === 0 || strcasecmp($r['Field'], 'id') === 0) { $hasIdUpper = true; break; }
-        }
-    } catch (\Throwable $e) {}
-
-    if ($hasIdUpper) {
-        $sql = "SELECT * FROM karta_ewidencyjna ORDER BY ID DESC LIMIT 500";
-    } else {
-        $sql = "SELECT * FROM karta_ewidencyjna LIMIT 500";
-    }
-    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 }
 
 // Szukanie
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((string)$_POST['query']) !== '') {
     $query_string = trim($_POST['query'] ?? '');
-    $levenshtein_distance = isset($_POST['levenshtein_distance']) ? (int)$_POST['levenshtein_distance'] : 2;
+    $has_search = true;
 
     $q_like = normalizeForLike($query_string);
+    $q_fold = normalizeSearchQuery($query_string);
+    $q_tokens = array_values(array_filter(explode(' ', $q_fold)));
 
     // Dokładne LIKE w całej tabeli
     $where = [];
-    foreach ($columns as $col) { $where[] = "LOWER(CAST($col AS CHAR)) LIKE :query"; }
+    $params = ['query' => '%' . $q_like . '%', 'query_fold' => '%' . $q_fold . '%'];
+    foreach ($columns as $col) {
+        $where[] = "LOWER(CAST($col AS CHAR)) LIKE :query";
+        $where[] = sqlFoldExpr($col) . " LIKE :query_fold";
+    }
+
+    $tokIdx = 0;
+    foreach ($q_tokens as $tok) {
+        if (mb_strlen($tok, 'UTF-8') < 3) continue;
+        $key = 'tok_' . $tokIdx++;
+        $params[$key] = '%' . $tok . '%';
+        foreach ($columns as $col) {
+            $where[] = sqlFoldExpr($col) . " LIKE :$key";
+        }
+    }
+
     $where_clause = implode(' OR ', $where);
     $stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna WHERE $where_clause LIMIT 100");
-    $stmt->execute(['query' => '%' . $q_like . '%']);
+    $stmt->execute($params);
     $search_results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Fuzzy
-    $fuzzyFields = ['nazwa_tytul','autor_wytworca','miejsce_powstania','technika_wykonania','material'];
-
-    $candidates = fetchFuzzyCandidates($pdo, $fuzzyFields, $query_string);
-
-    $ranked = [];
-    foreach ($candidates as $row) {
-        $best = PHP_INT_MAX;
-        foreach ($fuzzyFields as $ff) {
-            if (!array_key_exists($ff, $row)) continue;
-            $val = $row[$ff] ?? '';
-            if ($val === '' || $val === null) continue;
-            $d = minLevenshteinSubstr($val, $query_string);
-            if ($d < $best) $best = $d;
-            if ($best === 0) break;
-        }
-        if ($best <= $levenshtein_distance) { $row['_lev'] = $best; $ranked[] = $row; }
+    $search_state_id = bin2hex(random_bytes(8));
+    $_SESSION['search_states'][$search_state_id] = [
+        'query_string' => $query_string,
+        'search_results' => $search_results,
+        'selected_columns' => $selectedColumns,
+        'created_at' => time()
+    ];
+    if (count($_SESSION['search_states']) > 20) {
+        uasort($_SESSION['search_states'], static function($a, $b) {
+            return ($a['created_at'] ?? 0) <=> ($b['created_at'] ?? 0);
+        });
+        $_SESSION['search_states'] = array_slice($_SESSION['search_states'], -20, null, true);
     }
 
-    usort($ranked, function($a, $b){
-        $da = $a['_lev'] ?? 9999; $db = $b['_lev'] ?? 9999;
-        if ($da === $db) {
-            $ida = $a['ID'] ?? $a['id'] ?? 0;
-            $idb = $b['ID'] ?? $b['id'] ?? 0;
-            return $ida <=> $idb;
-        }
-        return $da <=> $db;
-    });
-
-    foreach ($ranked as $r) {
-        unset($r['_lev']);
-        $fuzzy_results[] = $r;
-        if (count($fuzzy_results) >= 50) break;
-    }
+    header('Location: search.php?state=' . urlencode($search_state_id));
+    exit;
 }
 ?>
 <!DOCTYPE html>
@@ -266,19 +215,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
         // spójność stanów select all
         function syncSelectAllStates() {
             const exactChecks = document.querySelectorAll('#tableExact tbody input.row-select[type="checkbox"]');
-            const fuzzyChecks = document.querySelectorAll('#tableFuzzy tbody input.row-select[type="checkbox"]');
-
             const exactAll = document.querySelector('#tableExact thead input.select-all');
-            const fuzzyAll = document.querySelector('#tableFuzzy thead input.select-all');
             const masterAll = document.querySelector('#selectAllBoth');
 
             const allExactChecked = exactChecks.length > 0 && Array.from(exactChecks).every(cb => cb.checked);
-            const allFuzzyChecked = fuzzyChecks.length > 0 && Array.from(fuzzyChecks).every(cb => cb.checked);
-            const allCheckedGlobal = (exactChecks.length + fuzzyChecks.length) > 0 &&
+            const allCheckedGlobal = exactChecks.length > 0 &&
                                      Array.from(document.querySelectorAll('table tbody input.row-select')).every(cb => cb.checked);
 
             if (exactAll) exactAll.checked = allExactChecked;
-            if (fuzzyAll) fuzzyAll.checked = allFuzzyChecked;
             if (masterAll) masterAll.checked = allCheckedGlobal;
         }
 
@@ -407,13 +351,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
         }
 
         // highlight w komórkach danych
-        function highlightQuery(query, fuzzy = false) {
+        function highlightQuery(query) {
             if (!query || query.length < 2) return;
             const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const rx = new RegExp('(' + escaped + ')', 'gi');
-            const scopeSelector = fuzzy ? ".fuzzy tbody td.data-col" : ".exact tbody td.data-col";
-            document.querySelectorAll(scopeSelector).forEach(td => {
-                td.innerHTML = td.textContent.replace(rx, `<span class="${fuzzy ? 'fuzzy-highlight' : 'highlight'}">$1</span>`);
+            document.querySelectorAll('.exact tbody td.data-col').forEach(td => {
+                td.innerHTML = td.textContent.replace(rx, `<span class="highlight">$1</span>`);
             });
         }
     </script>
@@ -471,19 +414,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
         <?php endforeach; ?>
         <!-- Ukryte pola aby nie zgubić zapytania po zmianie kolumn -->
         <input type="hidden" name="query" value="<?php echo htmlspecialchars($query_string); ?>">
-        <input type="hidden" name="levenshtein_distance" value="<?php echo (int)$levenshtein_distance; ?>">
         <button type="submit">Zastosuj kolumny</button>
     </form>
 
     <h2>Wyszukiwanie</h2>
     <form method="post" onsubmit="suppressUnloadWarning = true;">
         <input type="text" name="query" value="<?php echo htmlspecialchars($query_string); ?>" required>
-        <label>
-            Odległość Levenshteina:
-            <input type="range" name="levenshtein_distance" min="1" max="5" value="<?php echo (int)$levenshtein_distance; ?>"
-                   oninput="document.getElementById('levVal').textContent = this.value;">
-            <span id="levVal"><?php echo (int)$levenshtein_distance; ?></span>
-        </label>
         <?php foreach ($selectedColumns as $col): ?>
             <input type="hidden" name="visible_columns[]" value="<?php echo $col; ?>">
         <?php endforeach; ?>
@@ -493,7 +429,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
         Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
     </div>
 
-    <?php if ($_SERVER['REQUEST_METHOD'] === 'POST'): ?>
+    <?php if ($has_search): ?>
         <div class="data-table exact">
             <?php if (!empty($search_results)): ?>
                 <h3>Dokładne wyniki</h3>
@@ -527,7 +463,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
                                     </td>
                                 <?php endforeach; ?>
                                 <td class="no-highlight">
-                                    <a role="button" id="toggleButton" href="karta.php?id=<?php echo $entryId; ?>">Karta</a>
+                                    <?php
+                                        $kartaHref = 'karta.php?id=' . urlencode((string)$entryId);
+                                        if ($search_state_id !== '') {
+                                            $kartaHref .= '&search_return=' . urlencode('search.php?state=' . $search_state_id);
+                                        }
+                                    ?>
+                                    <a role="button" id="toggleButton" href="<?php echo $kartaHref; ?>">Karta</a>
                                     <select onchange="handleListSelection(this, <?php echo (int)$entryId; ?>)">
                                         <option value="">Dodaj do listy</option>
                                         <option value="new">+ Nowa lista</option>
@@ -546,64 +488,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
             <?php endif; ?>
         </div>
 
-        <div class="data-table fuzzy">
-            <?php if (!empty($fuzzy_results)): ?>
-                <h3>Przybliżone wyniki</h3>
-                <table id="tableFuzzy">
-                    <thead>
-                        <tr>
-                            <th style="width:36px;">
-                                <input type="checkbox" class="select-all" onclick="selectAllInTable(this, '#tableFuzzy')">
-                            </th>
-                            <?php foreach ($columns as $col): ?>
-                                <th class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">
-                                    <?php echo htmlspecialchars($col); ?>
-                                </th>
-                            <?php endforeach; ?>
-                            <th>Opcje</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($fuzzy_results as $row): ?>
-                            <?php
-                                $idField = isset($row['ID']) ? 'ID' : (isset($row['id']) ? 'id' : $columns[0]);
-                                $entryId = $row[$idField];
-                            ?>
-                            <tr>
-                                <td>
-                                    <input type="checkbox" class="row-select" data-entry-id="<?php echo (int)$entryId; ?>" onclick="toggleRowSelection(this)">
-                                </td>
-                                <?php foreach ($columns as $col): ?>
-                                    <td class="data-col" data-col="<?php echo $col; ?>" style="display:<?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>">
-                                        <?php echo htmlspecialchars($row[$col] ?? ''); ?>
-                                    </td>
-                                <?php endforeach; ?>
-                                <td class="no-highlight">
-                                    <a role="button" id="toggleButton" href="karta.php?id=<?php echo $entryId; ?>">Karta</a>
-                                    <select onchange="handleListSelection(this, <?php echo (int)$entryId; ?>)">
-                                        <option value="">Dodaj do listy</option>
-                                        <option value="new">+ Nowa lista</option>
-                                        <option disabled>──────────</option>
-                                        <?php foreach ($lists as $list): ?>
-                                            <option value="<?php echo $list['id']; ?>"><?php echo htmlspecialchars($list['list_name']); ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php else: ?>
-                <p>Brak przybliżonych wyników.</p>
-            <?php endif; ?>
-        </div>
             <div class="footer-right">
         Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
     </div>
         <script>
             updateColumnDisplay();
-            highlightQuery("<?php echo htmlspecialchars($query_string); ?>", false);
-            highlightQuery("<?php echo htmlspecialchars($query_string); ?>", true);
+            highlightQuery("<?php echo htmlspecialchars($query_string); ?>");
         </script>
     <?php endif; ?>
 </body>

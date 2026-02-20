@@ -15,6 +15,13 @@ if (!isset($_GET['id'])) {
 }
 
 $id = intval($_GET['id']);
+$searchReturnUrl = '';
+if (isset($_GET['search_return'])) {
+    $candidateReturnUrl = trim((string)$_GET['search_return']);
+    if (preg_match('/^search\.php(?:\?.*)?$/', $candidateReturnUrl)) {
+        $searchReturnUrl = $candidateReturnUrl;
+    }
+}
 
 // Pobranie danych karty ewidencyjnej
 $stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna WHERE ID = :id");
@@ -217,7 +224,10 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     </div>
 
             </div>
-    <a role="button" id="toggleButton" href="index.php">Powrót do listy</a> 
+    <a role="button" id="toggleButton" href="index.php">Powrót do listy</a>
+    <?php if ($searchReturnUrl !== ''): ?>
+        <a role="button" id="toggleButton" href="<?php echo htmlspecialchars($searchReturnUrl); ?>">Powrót do wyszukiwania</a>
+    <?php endif; ?>
 </div>
     
     <h1>Karta Ewidencji</h1>
