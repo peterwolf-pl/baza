@@ -416,3 +416,19 @@ th,
 .footer-right a:hover {
     text-decoration: underline;
 }
+
+
+.thumbnail-size-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 10px;
+}
+
+#thumbnailSizeSlider {
+    width: 125px;
+}
+
+.entry-thumbnail {
+    height: var(--thumbnail-height, 90px);
+}

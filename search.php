@@ -212,6 +212,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
         // kolumny widoczności
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
         let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
+        let thumbnailSizePx = 90;
         const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
 
         // globalny zbiór zaznaczeń z obu tabel
@@ -241,7 +242,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                 td.style.display = visibleColumns.includes(td.dataset.col) ? '' : 'none';
             });
         }
-        window.addEventListener('DOMContentLoaded', updateColumnDisplay);
+
+        function updateThumbnailSize(size) {
+            thumbnailSizePx = Math.max(25, Math.min(111, Number(size) || 90));
+            document.documentElement.style.setProperty('--thumbnail-height', thumbnailSizePx + 'px');
+
+            const slider = document.getElementById('thumbnailSizeSlider');
+            const value = document.getElementById('thumbnailSizeValue');
+            if (slider) slider.value = String(thumbnailSizePx);
+            if (value) value.textContent = thumbnailSizePx + 'px';
+        }
+        window.addEventListener('DOMContentLoaded', () => {
+            updateColumnDisplay();
+            updateThumbnailSize(90);
+        });
 
         function toast(msg, type='success'){
             const el = document.createElement('div');
@@ -502,6 +516,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
             <input type="hidden" name="visible_columns[]" value="<?php echo $col; ?>">
         <?php endforeach; ?>
         <button type="submit">Szukaj</button>
+        <label class="thumbnail-size-control" for="thumbnailSizeSlider">
+            <input type="range" id="thumbnailSizeSlider" min="25" max="111" value="90" oninput="updateThumbnailSize(this.value)">
+            <span id="thumbnailSizeValue">90px</span>
+        </label>
     </form>
              <div class="footer-right">
         Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
