@@ -57,28 +57,39 @@ if (!isset($collections[$selectedCollection])) {
 $mainTable = $collections[$selectedCollection]['main'];
 
 
-function buildImageUrl(?string $rawImageValue): ?string {
+function buildImagePaths(?string $rawImageValue, string $collection): array {
     if ($rawImageValue === null) {
-        return null;
+        return [null, null];
     }
 
     $normalizedImageValue = trim(trim($rawImageValue), " '\"");
     if ($normalizedImageValue === '') {
-        return null;
+        return [null, null];
     }
 
     if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
-        return $normalizedImageValue;
+        return [$normalizedImageValue, null];
     }
 
     $relativeImagePath = ltrim($normalizedImageValue, '/');
     $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
 
     if (empty($encodedSegments)) {
-        return null;
+        return [null, null];
     }
 
-    return 'https://baza.mkal.pl/gfx/' . implode('/', $encodedSegments);
+    $encodedPath = implode('/', $encodedSegments);
+    if ($collection === 'ksiazki-artystyczne') {
+        return [
+            'https://mkalodz.pl/bazagfx/' . $encodedPath,
+            'https://baza.mkal.pl/gfx/' . $encodedPath,
+        ];
+    }
+
+    return [
+        'https://baza.mkal.pl/gfx/' . $encodedPath,
+        'https://mkalodz.pl/bazagfx/' . $encodedPath,
+    ];
 }
 
 // AJAX: pobieranie wierszy
@@ -116,7 +127,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         foreach ($rows as &$row) {
-            $row['__thumbnail_url'] = buildImageUrl($row['dokumentacja_wizualna'] ?? null);
+            $thumbnailPaths = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection);
+            $row['__thumbnail_url'] = $thumbnailPaths[0];
+            $row['__thumbnail_fallback_url'] = $thumbnailPaths[1];
         }
         unset($row);
 
@@ -480,6 +493,13 @@ function loadRows() {
                     img.classList.add('entry-thumbnail');
                     img.alt = 'Miniatura wpisu';
                     img.src = row.__thumbnail_url;
+                    if (row.__thumbnail_fallback_url) {
+                        img.onerror = () => {
+                            if (img.src !== row.__thumbnail_fallback_url) {
+                                img.src = row.__thumbnail_fallback_url;
+                            }
+                        };
+                    }
                     tdThumbnail.appendChild(img);
                 } else {
                     tdThumbnail.textContent = '—';
