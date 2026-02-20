@@ -66,7 +66,7 @@ if (isset($_GET['edit']) && ctype_digit($_GET['edit'])) {
         <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <a href="https://baza.mkal.pl" class="back-link">Powrót do strony głównej</a>
+    <a role="button" id="toggleButton" href="https://baza.mkal.pl" class="back-link">Powrót do strony głównej</a>
     <h2>Listy</h2>
 
     <?php if ($edit_list): ?>

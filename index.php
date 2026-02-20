@@ -100,29 +100,32 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
 
         <div class="header-links">
 
-             <div>
-<a role="button" id="toggleButton" href="lists.php">Edytor list</a>
-<a role="button" href="logout.php" class="back-link" id="toggleButton">Wyloguj się</a> 
-</div>
+             
+
+ 
+
 <div class="header-low">
+    <a role="button" id="toggleButton" href="lists.php">Edytor list</a>
 <strong>Listy:</strong>
             <?php
             foreach ($lists as $list) {
-                echo "<a href='list_view.php?list_id={$list['id']}'>{$list['list_name']}</a>";
+                echo "<a href='list_view.php?list_id={$list['id']}'>{$list['list_name']}</a> &nbsp; ";
             }
             ?>
 
 </div>
+
+<a role="button" href="logout.php" class="back-link" id="toggleButton">Wyloguj się</a>
         </div>
     </div>
-
+<div class="header-links-left">
     <button id="toggleButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
-    &nbsp; &nbsp; &nbsp; &nbsp; 
+    
     <a role="button" id="toggleButton" href="neww.php">Nowy Wpis</a> 
-    &nbsp; &nbsp;  &nbsp; &nbsp; 
+    
     <a role="button" id="toggleButton" href="search.php">Szukaj</a>
    
-
+ </div>
     <div id="columnSelectorContainer" class="column-selector">
         <?php foreach ($columns as $col): ?>
             <label>

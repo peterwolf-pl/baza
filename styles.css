@@ -7,21 +7,23 @@ body { font-family: Arial, sans-serif; padding: 20px; }
 .data-table th { background-color: #f2f2f2; }
 .header-low { float: right; margin-top: 20px; background-color: #bbb; padding: 8px 16px; border-radius: 15px; }
 .header-links { float: right; margin-top: 20px; }
+.header-links-left { float: left; margin-top: 20px; }
 .header-links a { margin-left: 15px; text-decoration: none; color: #fff; }
 .header-links a:hover { text-decoration: underline; color: #000; }
-#columnSelectorContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; }
+#columnSelectorContainer { display: none; padding: 10px; border: 1px solid #000; background-color: #f9f9f9; }
 #toggleButton,
 #toggleColumndButton {
     display: inline-block;
     font-family: Arial, sans-serif;
-    font-size: 16px;
-    line-height: 1.2;
+    font-size: 12px;
+    line-height: 1;
     cursor: pointer;
-    margin-bottom: 15px;
+    margin-bottom: 0px;
+    padding-top: 0px;
     background-color: #007BFF;
     color: white;
     border: none;
-    padding: 8px 16px;
+    padding: 5px 11px;
     border-radius: 5px;
     text-decoration: none;
 }
@@ -56,7 +58,7 @@ th.data-col, td.data-col { }
     background-color: #007BFF;
     color: white;
     border: none;
-    padding: 8px 16px;
+    padding: 4px 6px;
     border-radius: 5px;
 }
 #togglePrzemieszczeniaButton:focus { outline: none; }

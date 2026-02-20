@@ -425,9 +425,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
         </a>
 
         <div class="header-links">
+            <div class="header-low">
             <?php foreach ($lists as $list): ?>
                 <a href="list_view.php?list_id=<?php echo $list['id']; ?>"><?php echo htmlspecialchars($list['list_name']); ?></a>
             <?php endforeach; ?>
+</div>
 
             <!-- Masowy dropdown do dodawania do listy oraz globalny zaznacz wszystko -->
             <div class="bulk-bar">
@@ -436,9 +438,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
                     <option value="">Wybierz</option>
                     <option value="new">+ Nowa lista</option>
                     <option disabled>──────────</option>
+                    <div class="header-low">
                     <?php foreach ($lists as $list): ?>
                         <option value="<?php echo $list['id']; ?>"><?php echo htmlspecialchars($list['list_name']); ?></option>
                     <?php endforeach; ?>
+                </div>
                 </select>
 
                 <label style="display:inline-flex; align-items:center; gap:6px; margin-left:8px;">
@@ -451,7 +455,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
         </div>
     </div>
 
-    <a href="https://baza.mkal.pl">Powrót do strony głównej</a>
+    <a role="button" id="toggleButton" href="https://baza.mkal.pl">Powrót do strony głównej</a>
     <br><br>
 
     <!-- Wybór kolumn -->
@@ -520,7 +524,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
                                     </td>
                                 <?php endforeach; ?>
                                 <td class="no-highlight">
-                                    <a role="button" href="karta.php?id=<?php echo $entryId; ?>">Karta</a>
+                                    <a role="button" id="toggleButton" href="karta.php?id=<?php echo $entryId; ?>">Karta</a>
                                     <select onchange="handleListSelection(this, <?php echo (int)$entryId; ?>)">
                                         <option value="">Dodaj do listy</option>
                                         <option value="new">+ Nowa lista</option>

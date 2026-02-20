@@ -349,20 +349,25 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     <div class="header">
         <a href="https://baza.mkal.pl">
             <img src="bazamka.png" width="400" alt="Logo bazy Muzeum Książki Artystycznej" class="logo">
-        </a>
+        </a><br>
+        <div class="header-links-left">
+        <a role="button" id="toggleButton" href="index.php">Wróć do głównej</a>
+        <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
+    </div>
         <div class="header-links">
+            <div class="header-low">
             <?php foreach ($lists as $l): ?>
                 <a href="list_view.php?list_id=<?php echo (int)$l['id']; ?>"><?php echo htmlspecialchars($l['list_name']); ?></a>
             <?php endforeach; ?>
-        </div>
+        </div></div>
     </div>
 
     <h1>Lista: <?php echo htmlspecialchars($list['list_name']); ?></h1>
-    <a href="index.php">Wróć do głównej</a>
+    
     <br><br>
 
-    <!-- Wybór kolumn identyczny jak w pierwszym pliku -->
-    <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
+    
+   
     <form id="columnSelectorContainer" class="column-selector" method="post" action="">
         <?php foreach ($columns as $col): ?>
             <label>
@@ -401,7 +406,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
                                 $idField = isset($row['ID']) ? 'ID' : (isset($row['id']) ? 'id' : $columns[0]);
                                 $entryId = $row[$idField];
                                 ?>
-                                <a role="button" href="karta.php?id=<?php echo (int)$entryId; ?>">Karta</a>
+                                <a role="button" id="toggleButton"href="karta.php?id=<?php echo (int)$entryId; ?>">Karta</a>
                                 <select onchange="handleListSelection(this, <?php echo (int)$entryId; ?>)">
                                     <option value="">Dodaj do listy</option>
                                     <option value="new">+ Nowa lista</option>

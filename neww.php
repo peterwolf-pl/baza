@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_karta'])) {
         </a>
     </div>
 
-    <a role="button" href="index.php">Powrót do listy</a> 
+    <a role="button" id="toggleButton" href="index.php">Powrót do listy</a> 
     
     <h1>Dodaj Nową Pozycję Ewidencyjną</h1>
     <form method="post" class="add-form">
