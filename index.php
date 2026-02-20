@@ -263,6 +263,8 @@ function toggleColumn(column) {
 // Dodawanie do list
 function handleListSelection(select, entryId) {
     const selectedValue = select.value;
+    const normalizedEntryId = Number.parseInt(entryId, 10);
+
     function showTemporaryMessage(message, type = 'success') {
         const messageContainer = document.createElement('div');
         messageContainer.textContent = message;
@@ -278,13 +280,19 @@ function handleListSelection(select, entryId) {
         setTimeout(() => { messageContainer.remove(); }, 1000);
     }
 
+    if (selectedValue && (!Number.isInteger(normalizedEntryId) || normalizedEntryId <= 0)) {
+        showTemporaryMessage("Wystąpił błąd: nie udało się odczytać ID wpisu.", 'error');
+        select.value = '';
+        return;
+    }
+
     if (selectedValue === "new") {
         const newListName = prompt("Podaj nazwę nowej listy:");
         if (newListName) {
             fetch('add_list.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newListName, entry_id: entryId, collection: selectedCollection })
+                body: JSON.stringify({ name: newListName, entry_id: normalizedEntryId, collection: selectedCollection })
             })
             .then(response => response.json())
             .then(data => {
@@ -300,7 +308,7 @@ function handleListSelection(select, entryId) {
         fetch('add_to_list.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ list_id: selectedValue, entry_id: entryId, collection: selectedCollection })
+            body: JSON.stringify({ list_id: selectedValue, entry_id: normalizedEntryId, collection: selectedCollection })
         })
         .then(response => response.json())
         .then(data => {
@@ -328,6 +336,27 @@ function getListOptionsHtml() {
         html += `<option value="${list.id}">${list.list_name}</option>`;
     });
     return html;
+}
+
+function getRowId(row, columns) {
+    if (row['ID'] !== undefined && row['ID'] !== null && row['ID'] !== '') {
+        return Number.parseInt(row['ID'], 10);
+    }
+    if (row['id'] !== undefined && row['id'] !== null && row['id'] !== '') {
+        return Number.parseInt(row['id'], 10);
+    }
+
+    const idKey = Object.keys(row).find(key => key.toLowerCase() === 'id');
+    if (idKey) {
+        return Number.parseInt(row[idKey], 10);
+    }
+
+    const idColumn = columns.find(col => col.toLowerCase() === 'id');
+    if (idColumn && row[idColumn] !== undefined && row[idColumn] !== null && row[idColumn] !== '') {
+        return Number.parseInt(row[idColumn], 10);
+    }
+
+    return NaN;
 }
 
 function loadRows() {
@@ -375,11 +404,17 @@ function loadRows() {
                 // Opcje
                 const tdOptions = document.createElement('td');
                 tdOptions.width = "222";
-                // użyj klucza ID lub id (wykryj automatycznie)
-                const idField = row['ID'] !== undefined ? 'ID' : (row['id'] !== undefined ? 'id' : columns[0]);
+                const rowId = getRowId(row, columns);
+                const hasValidRowId = Number.isInteger(rowId) && rowId > 0;
+                const entryIdForHandlers = hasValidRowId ? rowId : 0;
+                const kartaHref = hasValidRowId
+                    ? `karta.php?id=${rowId}&collection=${encodeURIComponent(selectedCollection)}`
+                    : '#';
+                const selectDisabled = hasValidRowId ? '' : 'disabled';
+
                 tdOptions.innerHTML = `
-                    <a role="button" id="toggleButton" href="karta.php?id=${row[idField]}&collection=${encodeURIComponent(selectedCollection)}">Karta</a>
-                    <select onchange="handleListSelection(this, ${row[idField]})">
+                    <a role="button" id="toggleButton" href="${kartaHref}">Karta</a>
+                    <select ${selectDisabled} onchange="handleListSelection(this, ${entryIdForHandlers})">
                         ${getListOptionsHtml()}
                     </select>
                 `;
