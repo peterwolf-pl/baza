@@ -245,6 +245,7 @@ $thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SE
 </div>
 
 <a role="button" href="logout.php" class="back-link" id="toggleButton">Wyloguj się <?php echo htmlspecialchars($username); ?></a>
+<a role="button" href="project_info.php" id="toggleButton" title="Informacje o projekcie">?!</a>
         </div>
     </div>
 <div class="header-links-left">
