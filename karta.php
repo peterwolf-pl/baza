@@ -73,8 +73,15 @@ if (!empty($row['dokumentacja_wizualna'])) {
     if (preg_match('#^https?://#i', $rawImageValue) === 1 || str_starts_with($rawImageValue, '/')) {
         $image_path = $rawImageValue;
     } else {
-        $safeImageName = basename($rawImageValue);
-        $image_path = '/gfx/' . rawurlencode($safeImageName);
+        $relativeImagePath = ltrim($rawImageValue, '/');
+        $localImagePath = __DIR__ . '/' . $relativeImagePath;
+
+        if (is_file($localImagePath)) {
+            $image_path = $relativeImagePath;
+        } else {
+            $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
+            $image_path = 'https://mkalodz.pl/bazagfx/' . implode('/', $encodedSegments);
+        }
     }
 }
 
