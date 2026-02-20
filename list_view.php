@@ -207,30 +207,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
 <head>
     <meta charset="UTF-8">
     <title>baza.mkal.pl - Lista: <?php echo htmlspecialchars($list['list_name']); ?></title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px; }
-        .header-links { float: right; margin-top: 20px; }
-        .header-links a { margin-left: 10px; text-decoration: none; color: #007BFF; font-weight: bold; }
-        .header-links a:hover { text-decoration: underline; }
-        .data-table table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        .data-table th, .data-table td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
-        .data-table th { background-color: #f2f2f2; }
-        #columnSelectorContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-bottom: 20px; }
-        #toggleColumndButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        .no-highlight { user-select: text; }
-        .logo { display: inline-block; }
-        .highlight { background: yellow; font-weight: bold; }
-        .fuzzy-highlight { background: #bfffbf; font-weight: bold; }
-        th.data-col, td.data-col { /* sterowane JSem przez display */ }
-        #bulkPrzemieszczenieContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-top: 15px; }
-        #toggleBulkPrzemieszczenieButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-top: 15px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        #toggleCommonPrzemieszczeniaButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-top: 15px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
-        .bulk-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-        .bulk-form input, .bulk-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
-        #commonPrzemieszczeniaContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-top: 15px; }
-        .message-success { color: #0a7d1a; font-weight: bold; margin-top: 10px; }
-        .message-error { color: #c40000; font-weight: bold; margin-top: 10px; }
-    </style>
+        <link rel="stylesheet" href="styles.css">
     <script>
         // przekazujemy wybrane kolumny do JS
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;

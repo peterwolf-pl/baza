@@ -1,0 +1,92 @@
+/* Global base styles (from index.php) */
+body { font-family: Arial, sans-serif; padding: 20px; }
+.column-selector, .data-table { margin-top: 20px; }
+.column-selector label { display: block; }
+.data-table table { border-collapse: collapse; width: 100%; }
+.data-table th, .data-table td { border: 1px solid #ddd; padding: 8px; }
+.data-table th { background-color: #f2f2f2; }
+.header-low { float: right; margin-top: 20px; background-color: #bbb; padding: 8px 16px; border-radius: 15px; }
+.header-links { float: right; margin-top: 20px; }
+.header-links a { margin-left: 15px; text-decoration: none; color: #fff; }
+.header-links a:hover { text-decoration: underline; color: #000; }
+#columnSelectorContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; }
+#toggleButton, #toggleColumndButton { font-family: Arial, sans-serif; font-size: 4; cursor: pointer; margin-bottom: 15px; background-color: #007BFF; color: white; border: 1px; padding: 8px 16px; border-radius: 5px; }
+#toggleButton:focus { outline: none; font-family: Arial, sans-serif; font-size: 4; }
+
+/* Page-specific additions from other PHP files */
+.header { display: flex; align-items: center; gap: 16px; }
+.header .header-links { margin-left: auto; display: flex; align-items: center; gap: 12px; float: none; margin-top: 0; }
+.header .header-links a { color: #007BFF; font-weight: bold; margin-left: 0; }
+.bulk-bar { display: inline-flex; align-items: center; gap: 8px; }
+
+.data-table th, .data-table td { vertical-align: top; }
+.no-highlight { user-select: text; }
+.no-highlight { white-space: nowrap; }
+.highlight { background: yellow; font-weight: bold; }
+.fuzzy-highlight { background: #bfffbf; font-weight: bold; }
+.muted { color: #666; font-size: 12px; }
+.logo { display: inline-block; }
+th.data-col, td.data-col { }
+
+#bulkPrzemieszczenieContainer,
+#commonPrzemieszczeniaContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-top: 15px; }
+#toggleBulkPrzemieszczenieButton,
+#toggleCommonPrzemieszczeniaButton,
+#togglePrzemieszczeniaButton {
+    font-family: Arial, sans-serif;
+    font-size: 16px;
+    cursor: pointer;
+    margin-top: 15px;
+    margin-bottom: 10px;
+    background-color: #007BFF;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 5px;
+}
+#togglePrzemieszczeniaButton:focus { outline: none; }
+.bulk-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.bulk-form input, .bulk-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+
+.details { width: 50%; }
+.image-container { width: 700px; padding-top: 150px; }
+.image-container img { max-width: 80%; height: auto; }
+.back-link { margin-top: 20px; display: inline-block; margin-bottom: 18px; }
+#przemieszczeniaContainer,
+#editKartaContainer,
+#logContainer { display: none; padding-top: 10px; }
+.add-form, .edit-form { margin-top: 20px; }
+.add-form input,
+.add-form textarea,
+.edit-form input,
+.edit-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; }
+.message-success { color: #0a7d1a; font-weight: bold; margin-top: 10px; }
+.message-error { color: #c40000; font-weight: bold; margin-top: 10px; }
+
+table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+th { background-color: #f2f2f2; }
+button { cursor: pointer; margin-bottom: 10px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
+button:focus { outline: none; }
+.footer-right { position: fixed; bottom: 10px; right: 5%; font-size: 10px; font-family: Arial, sans-serif; }
+.footer-right a { color: #007bff; text-decoration: none; }
+.footer-right a:hover { text-decoration: underline; }
+
+h1, h2, h3 {
+    font-family: GrohmanGrotesk;
+    src: url('/gg.woff2') format('woff2');
+}
+
+.lists-table, .entries-table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
+.lists-table th, .lists-table td,
+.entries-table th, .entries-table td { border: 1px solid #ccc; padding: 8px; }
+.lists-table th, .entries-table th { background: #f4f4f4; }
+.edit-btn, .delete-btn, .remove-btn { background: #007BFF; color: white; border: none; padding: 4px 8px; cursor: pointer; border-radius: 4px; margin-right: 4px; }
+.delete-btn, .remove-btn { background: #dc3545; }
+.form-inline { display: inline; }
+
+.add-form { max-width: 600px; }
+.add-form label { font-weight: bold; display: block; margin-top: 10px; }
+.add-form input, .add-form textarea { margin-top: 5px; margin-bottom: 15px; }
+.add-form input[type="submit"] { background-color: #007BFF; color: white; border: none; padding: 10px 20px; cursor: pointer; border-radius: 5px; }
+.add-form input[type="submit"]:hover { background-color: #0056b3; }
