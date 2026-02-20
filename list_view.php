@@ -17,6 +17,99 @@ if (!$list_id) {
     exit;
 }
 
+function ensureMoveUsernameColumn(PDO $pdo): bool {
+    try {
+        $moveTableColumns = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna_przemieszczenia")
+            ->fetchAll(PDO::FETCH_COLUMN);
+
+        if (!in_array('user_username', $moveTableColumns, true)) {
+            $pdo->exec("ALTER TABLE karta_ewidencyjna_przemieszczenia ADD COLUMN user_username VARCHAR(255) NULL");
+        }
+
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+$hasMoveUsernameColumn = ensureMoveUsernameColumn($pdo);
+
+function getNextPrzemieszczenieNumber(PDO $pdo): string {
+    $stmt = $pdo->query(
+        "SELECT COALESCE(MAX(CAST(numer_przemieszczenia AS UNSIGNED)), 0) + 1
+         FROM karta_ewidencyjna_przemieszczenia
+         WHERE numer_przemieszczenia REGEXP '^[0-9]+$'"
+    );
+    return (string)$stmt->fetchColumn();
+}
+
+$bulkMoveSuccess = null;
+$bulkMoveError = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszczenie'])) {
+    $dataPrzemieszczenia = trim($_POST['data_przemieszczenia'] ?? '');
+    $dataZwrotu = trim($_POST['data_zwrotu'] ?? '');
+    $miejscePrzemieszczenia = trim($_POST['miejsce_przemieszczenia'] ?? '');
+    $powodCelPrzemieszczenia = trim($_POST['powod_cel_przemieszczenia'] ?? '');
+
+    if ($dataPrzemieszczenia === '' || $miejscePrzemieszczenia === '') {
+        $bulkMoveError = 'Uzupełnij pola wymagane: data i miejsce przemieszczenia.';
+    } else {
+        $entryIdsStmt = $pdo->prepare("SELECT DISTINCT entry_id FROM list_items WHERE list_id = ?");
+        $entryIdsStmt->execute([$list_id]);
+        $entryIds = $entryIdsStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        if (empty($entryIds)) {
+            $bulkMoveError = 'Ta lista nie zawiera pozycji do przemieszczenia.';
+        } else {
+            try {
+                $pdo->beginTransaction();
+
+                $numerPrzemieszczenia = getNextPrzemieszczenieNumber($pdo);
+
+                if ($hasMoveUsernameColumn) {
+                    $insertStmt = $pdo->prepare(
+                        "INSERT INTO karta_ewidencyjna_przemieszczenia
+                        (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia, user_username)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)"
+                    );
+                } else {
+                    $insertStmt = $pdo->prepare(
+                        "INSERT INTO karta_ewidencyjna_przemieszczenia
+                        (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia)
+                        VALUES (?, ?, ?, ?, ?, ?)"
+                    );
+                }
+
+                foreach ($entryIds as $entryId) {
+                    $params = [
+                        (int)$entryId,
+                        $dataPrzemieszczenia,
+                        $dataZwrotu !== '' ? $dataZwrotu : null,
+                        $numerPrzemieszczenia,
+                        $miejscePrzemieszczenia,
+                        $powodCelPrzemieszczenia !== '' ? $powodCelPrzemieszczenia : null
+                    ];
+
+                    if ($hasMoveUsernameColumn) {
+                        $params[] = $_SESSION['username'] ?? null;
+                    }
+
+                    $insertStmt->execute($params);
+                }
+
+                $pdo->commit();
+                $bulkMoveSuccess = 'Dodano przemieszczenie nr ' . $numerPrzemieszczenia . ' do wszystkich pozycji z tej listy.';
+            } catch (PDOException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $bulkMoveError = 'Nie udało się dodać przemieszczeń: ' . $e->getMessage();
+            }
+        }
+    }
+}
+
 // Pobierz nazwy kolumn z tabeli
 $columns = [];
 $colsStmt = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna");
@@ -58,6 +151,56 @@ if (!$list) {
     echo "Lista nie istnieje.";
     exit;
 }
+
+$entryIdsForList = array_values(array_unique(array_map(
+    static fn(array $entry): int => (int)($entry['ID'] ?? $entry['id'] ?? 0),
+    $entries
+)));
+$entryIdsForList = array_values(array_filter($entryIdsForList, static fn(int $id): bool => $id > 0));
+
+$commonPrzemieszczenia = [];
+if (!empty($entryIdsForList)) {
+    $placeholders = implode(',', array_fill(0, count($entryIdsForList), '?'));
+
+    if ($hasMoveUsernameColumn) {
+        $commonMovesSql = "
+            SELECT
+                data_przemieszczenia,
+                data_zwrotu,
+                numer_przemieszczenia,
+                miejsce_przemieszczenia,
+                powod_cel_przemieszczenia,
+                user_username,
+                COUNT(DISTINCT karta_id) AS karta_count
+            FROM karta_ewidencyjna_przemieszczenia
+            WHERE karta_id IN ($placeholders)
+            GROUP BY data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia, user_username
+            HAVING karta_count = ?
+            ORDER BY CAST(numer_przemieszczenia AS UNSIGNED) DESC, data_przemieszczenia DESC
+        ";
+    } else {
+        $commonMovesSql = "
+            SELECT
+                data_przemieszczenia,
+                data_zwrotu,
+                numer_przemieszczenia,
+                miejsce_przemieszczenia,
+                powod_cel_przemieszczenia,
+                COUNT(DISTINCT karta_id) AS karta_count
+            FROM karta_ewidencyjna_przemieszczenia
+            WHERE karta_id IN ($placeholders)
+            GROUP BY data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia
+            HAVING karta_count = ?
+            ORDER BY CAST(numer_przemieszczenia AS UNSIGNED) DESC, data_przemieszczenia DESC
+        ";
+    }
+
+    $commonMovesStmt = $pdo->prepare($commonMovesSql);
+    $commonMovesStmt->execute(array_merge($entryIdsForList, [count($entryIdsForList)]));
+    $commonPrzemieszczenia = $commonMovesStmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+$nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -79,6 +222,14 @@ if (!$list) {
         .highlight { background: yellow; font-weight: bold; }
         .fuzzy-highlight { background: #bfffbf; font-weight: bold; }
         th.data-col, td.data-col { /* sterowane JSem przez display */ }
+        #bulkPrzemieszczenieContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-top: 15px; }
+        #toggleBulkPrzemieszczenieButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-top: 15px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
+        #toggleCommonPrzemieszczeniaButton { font-family: Arial, sans-serif; font-size: 16px; cursor: pointer; margin-top: 15px; background-color: #007BFF; color: white; border: none; padding: 8px 16px; border-radius: 5px; }
+        .bulk-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .bulk-form input, .bulk-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+        #commonPrzemieszczeniaContainer { display: none; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; margin-top: 15px; }
+        .message-success { color: #0a7d1a; font-weight: bold; margin-top: 10px; }
+        .message-error { color: #c40000; font-weight: bold; margin-top: 10px; }
     </style>
     <script>
         // przekazujemy wybrane kolumny do JS
@@ -113,7 +264,44 @@ if (!$list) {
             });
         }
 
-        window.addEventListener('DOMContentLoaded', updateColumnDisplay);
+        function toggleBulkPrzemieszczenieForm() {
+            const container = document.getElementById('bulkPrzemieszczenieContainer');
+            const button = document.getElementById('toggleBulkPrzemieszczenieButton');
+            const isHidden = window.getComputedStyle(container).display === 'none';
+            if (isHidden) {
+                container.style.display = 'block';
+                button.textContent = 'Ukryj formularz przemieszczenia listy';
+            } else {
+                container.style.display = 'none';
+                button.textContent = 'Dodaj przemieszczenie całej listy';
+            }
+        }
+
+        function toggleCommonPrzemieszczenia() {
+            const container = document.getElementById('commonPrzemieszczeniaContainer');
+            const button = document.getElementById('toggleCommonPrzemieszczeniaButton');
+            const isHidden = window.getComputedStyle(container).display === 'none';
+            if (isHidden) {
+                container.style.display = 'block';
+                button.textContent = 'Ukryj wspólne przemieszczenia listy';
+            } else {
+                container.style.display = 'none';
+                button.textContent = 'Wspólne przemieszczenia listy';
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            updateColumnDisplay();
+            const shouldOpenBulkForm = <?php echo json_encode($bulkMoveSuccess !== null || $bulkMoveError !== null); ?>;
+            if (shouldOpenBulkForm) {
+                const container = document.getElementById('bulkPrzemieszczenieContainer');
+                const button = document.getElementById('toggleBulkPrzemieszczenieButton');
+                if (container && button) {
+                    container.style.display = 'block';
+                    button.textContent = 'Ukryj formularz przemieszczenia listy';
+                }
+            }
+        });
 
         function handleListSelection(select, entryId) {
             const selectedValue = select.value;
@@ -250,8 +438,79 @@ if (!$list) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+
+            <div class="bulk-actions">
+                <button id="toggleBulkPrzemieszczenieButton" type="button" onclick="toggleBulkPrzemieszczenieForm()">Dodaj przemieszczenie całej listy</button>
+                <button id="toggleCommonPrzemieszczeniaButton" type="button" onclick="toggleCommonPrzemieszczenia()">Wspólne przemieszczenia listy</button>
+            </div>
+            <div id="bulkPrzemieszczenieContainer">
+                <h3>Nowe przemieszczenie dla całej listy</h3>
+                <form method="post" class="bulk-form">
+                    <input type="hidden" name="add_bulk_przemieszczenie" value="1">
+
+                    <label for="data_przemieszczenia">Data Przemieszczenia</label>
+                    <input type="date" name="data_przemieszczenia" id="data_przemieszczenia" required>
+
+                    <label for="data_zwrotu">Data Zwrotu</label>
+                    <input type="date" name="data_zwrotu" id="data_zwrotu">
+
+                    <label for="numer_przemieszczenia">Numer Przemieszczenia (nadawany automatycznie)</label>
+                    <input type="text" id="numer_przemieszczenia" value="<?php echo htmlspecialchars($nextPrzemieszczeniaNumber); ?>" readonly>
+
+                    <label for="miejsce_przemieszczenia">Miejsce Przemieszczenia</label>
+                    <input type="text" name="miejsce_przemieszczenia" id="miejsce_przemieszczenia" required>
+
+                    <label for="powod_cel_przemieszczenia">Powód/Cel Przemieszczenia</label>
+                    <textarea name="powod_cel_przemieszczenia" id="powod_cel_przemieszczenia"></textarea>
+
+                    <button type="submit">Dodaj</button>
+                </form>
+            </div>
+
+            <div id="commonPrzemieszczeniaContainer">
+                <h3>Wspólne przemieszczenia dla pozycji z tej listy</h3>
+                <?php if (!empty($commonPrzemieszczenia)): ?>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Data Przemieszczenia</th>
+                                <th>Data Zwrotu</th>
+                                <th>Numer Przemieszczenia</th>
+                                <th>Miejsce Przemieszczenia</th>
+                                <th>Powód/Cel Przemieszczenia</th>
+                                <?php if ($hasMoveUsernameColumn): ?>
+                                    <th>Użytkownik</th>
+                                <?php endif; ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($commonPrzemieszczenia as $przemieszczenie): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['data_przemieszczenia'] ?? ''); ?></td>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['data_zwrotu'] ?? ''); ?></td>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['numer_przemieszczenia'] ?? ''); ?></td>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['miejsce_przemieszczenia'] ?? ''); ?></td>
+                                    <td><?php echo htmlspecialchars($przemieszczenie['powod_cel_przemieszczenia'] ?? ''); ?></td>
+                                    <?php if ($hasMoveUsernameColumn): ?>
+                                        <td><?php echo htmlspecialchars($przemieszczenie['user_username'] ?? ''); ?></td>
+                                    <?php endif; ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php else: ?>
+                    <p>Brak wspólnych przemieszczeń dla wszystkich pozycji na tej liście.</p>
+                <?php endif; ?>
+            </div>
         <?php else: ?>
             <p>Brak wpisów na tej liście.</p>
+        <?php endif; ?>
+
+        <?php if ($bulkMoveSuccess): ?>
+            <p class="message-success"><?php echo htmlspecialchars($bulkMoveSuccess); ?></p>
+        <?php endif; ?>
+        <?php if ($bulkMoveError): ?>
+            <p class="message-error"><?php echo htmlspecialchars($bulkMoveError); ?></p>
         <?php endif; ?>
     </div>
 

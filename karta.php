@@ -30,8 +30,84 @@ $image_path = !empty($row['dokumentacja_wizualna'])
     ? 'https://mkalodz.pl/bazagfx/' . htmlspecialchars(str_replace("'", "", $row['dokumentacja_wizualna']))
     : null;
 
+function ensureMoveUsernameColumn(PDO $pdo): bool {
+    try {
+        $moveTableColumns = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna_przemieszczenia")
+            ->fetchAll(PDO::FETCH_COLUMN);
 
+        if (!in_array('user_username', $moveTableColumns, true)) {
+            $pdo->exec("ALTER TABLE karta_ewidencyjna_przemieszczenia ADD COLUMN user_username VARCHAR(255) NULL");
+        }
 
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+$hasMoveUsernameColumn = ensureMoveUsernameColumn($pdo);
+
+function getNextPrzemieszczenieNumber(PDO $pdo): string {
+    $stmt = $pdo->query(
+        "SELECT COALESCE(MAX(CAST(numer_przemieszczenia AS UNSIGNED)), 0) + 1
+         FROM karta_ewidencyjna_przemieszczenia
+         WHERE numer_przemieszczenia REGEXP '^[0-9]+$'"
+    );
+    return (string)$stmt->fetchColumn();
+}
+
+$moveAddError = null;
+$moveAddSuccess = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_przemieszczenie'])) {
+    $dataPrzemieszczenia = trim($_POST['data_przemieszczenia'] ?? '');
+    $dataZwrotu = trim($_POST['data_zwrotu'] ?? '');
+    $miejscePrzemieszczenia = trim($_POST['miejsce_przemieszczenia'] ?? '');
+    $powodCelPrzemieszczenia = trim($_POST['powod_cel_przemieszczenia'] ?? '');
+
+    if ($dataPrzemieszczenia === '' || $miejscePrzemieszczenia === '') {
+        $moveAddError = 'Uzupełnij pola wymagane: data i miejsce przemieszczenia.';
+    } else {
+        try {
+            $numerPrzemieszczenia = getNextPrzemieszczenieNumber($pdo);
+
+            if ($hasMoveUsernameColumn) {
+                $insertStmt = $pdo->prepare(
+                    "INSERT INTO karta_ewidencyjna_przemieszczenia
+                    (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia, user_username)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)"
+                );
+                $insertStmt->execute([
+                    $id,
+                    $dataPrzemieszczenia,
+                    $dataZwrotu !== '' ? $dataZwrotu : null,
+                    $numerPrzemieszczenia,
+                    $miejscePrzemieszczenia,
+                    $powodCelPrzemieszczenia !== '' ? $powodCelPrzemieszczenia : null,
+                    $_SESSION['username'] ?? null
+                ]);
+            } else {
+                $insertStmt = $pdo->prepare(
+                    "INSERT INTO karta_ewidencyjna_przemieszczenia
+                    (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia)
+                    VALUES (?, ?, ?, ?, ?, ?)"
+                );
+                $insertStmt->execute([
+                    $id,
+                    $dataPrzemieszczenia,
+                    $dataZwrotu !== '' ? $dataZwrotu : null,
+                    $numerPrzemieszczenia,
+                    $miejscePrzemieszczenia,
+                    $powodCelPrzemieszczenia !== '' ? $powodCelPrzemieszczenia : null
+                ]);
+            }
+
+            $moveAddSuccess = 'Dodano przemieszczenie nr ' . $numerPrzemieszczenia . '.';
+        } catch (PDOException $e) {
+            $moveAddError = 'Błąd dodawania przemieszczenia: ' . $e->getMessage();
+        }
+    }
+}
 
 
 // Obsługa formularza edycji
@@ -123,6 +199,7 @@ $log_entries = $log_stmt->fetchAll(PDO::FETCH_ASSOC);
 $przemieszczenia_stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna_przemieszczenia WHERE karta_id = :id");
 $przemieszczenia_stmt->execute(['id' => $id]);
 $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
+$nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
 ?>
 
 <!DOCTYPE html>
@@ -153,6 +230,8 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
         #toggleButton:focus { outline: none; }
         .add-form, .edit-form { margin-top: 20px; }
         .add-form input, .add-form textarea, .edit-form input, .edit-form textarea { width: 100%; padding: 8px; margin-bottom: 10px; }
+        .message-success { color: #0a7d1a; font-weight: bold; margin-top: 10px; }
+        .message-error { color: #c40000; font-weight: bold; margin-top: 10px; }
 
 
     </style>
@@ -243,6 +322,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
                     <th>Numer Przemieszczenia</th>
                     <th>Miejsce Przemieszczenia</th>
                     <th>Powód/Cel Przemieszczenia</th>
+                    <th>Użytkownik</th>
                 </tr>
             </thead>
             <tbody>
@@ -253,6 +333,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
                         <td><?= htmlspecialchars($przemieszczenie['numer_przemieszczenia']); ?></td>
                         <td><?= htmlspecialchars($przemieszczenie['miejsce_przemieszczenia']); ?></td>
                         <td><?= htmlspecialchars($przemieszczenie['powod_cel_przemieszczenia']); ?></td>
+                        <td><?= htmlspecialchars($przemieszczenie['user_username'] ?? ''); ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -262,14 +343,15 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
 
    <h3>Dodaj nowe przemieszczenie:</h3>
         <form method="post" class="add-form">
+            <input type="hidden" name="add_przemieszczenie" value="1">
             <label for="data_przemieszczenia">Data Przemieszczenia</label>
             <input type="date" name="data_przemieszczenia" id="data_przemieszczenia" required>
 
             <label for="data_zwrotu">Data Zwrotu</label>
             <input type="date" name="data_zwrotu" id="data_zwrotu">
 
-            <label for="numer_przemieszczenia">Numer Przemieszczenia</label>
-            <input type="text" name="numer_przemieszczenia" id="numer_przemieszczenia" required>
+            <label for="numer_przemieszczenia">Numer Przemieszczenia (nadawany automatycznie)</label>
+            <input type="text" id="numer_przemieszczenia" value="<?= htmlspecialchars($nextPrzemieszczeniaNumber) ?>" readonly>
 
             <label for="miejsce_przemieszczenia">Miejsce Przemieszczenia</label>
             <input type="text" name="miejsce_przemieszczenia" id="miejsce_przemieszczenia" required>
@@ -280,6 +362,12 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
             <button id="togglePrzemieszczeniaButton" type="submit">Dodaj</button>
         </form>
 
+        <?php if ($moveAddSuccess): ?>
+            <p class="message-success"><?= htmlspecialchars($moveAddSuccess) ?></p>
+        <?php endif; ?>
+        <?php if ($moveAddError): ?>
+            <p class="message-error"><?= htmlspecialchars($moveAddError) ?></p>
+        <?php endif; ?>
 
     </div>
 
@@ -303,6 +391,16 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
             const container = document.getElementById('przemieszczeniaContainer');
             container.style.display = container.style.display === 'none' || container.style.display === '' ? 'block' : 'none';
         }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const shouldOpen = <?= json_encode($moveAddSuccess !== null || $moveAddError !== null) ?>;
+            if (shouldOpen) {
+                const container = document.getElementById('przemieszczeniaContainer');
+                if (container) {
+                    container.style.display = 'block';
+                }
+            }
+        });
     </script>
 </body>
 </html>
