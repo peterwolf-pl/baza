@@ -56,6 +56,31 @@ if (!isset($collections[$selectedCollection])) {
 }
 $mainTable = $collections[$selectedCollection]['main'];
 
+
+function buildImageUrl(?string $rawImageValue): ?string {
+    if ($rawImageValue === null) {
+        return null;
+    }
+
+    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
+    if ($normalizedImageValue === '') {
+        return null;
+    }
+
+    if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
+        return $normalizedImageValue;
+    }
+
+    $relativeImagePath = ltrim($normalizedImageValue, '/');
+    $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
+
+    if (empty($encodedSegments)) {
+        return null;
+    }
+
+    return 'https://baza.mkal.pl/gfx/' . implode('/', $encodedSegments);
+}
+
 // AJAX: pobieranie wierszy
 if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
     $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
@@ -89,6 +114,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
 
         $stmt = $pdo->query($selectSql);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as &$row) {
+            $row['__thumbnail_url'] = buildImageUrl($row['dokumentacja_wizualna'] ?? null);
+        }
+        unset($row);
 
         header('Content-Type: application/json');
         echo json_encode([
@@ -215,6 +245,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
         <table id="dataTable">
             <thead>
                 <tr>
+                    <th>Miniatura foto</th>
                     <?php foreach ($columns as $col): ?>
                         <th class="<?php echo $col; ?>" 
                             style="display: <?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>;">
@@ -415,6 +446,20 @@ function loadRows() {
 
             rows.forEach(row => {
                 const tr = document.createElement('tr');
+
+                const tdThumbnail = document.createElement('td');
+                tdThumbnail.classList.add('entry-thumbnail-cell');
+                if (row.__thumbnail_url) {
+                    const img = document.createElement('img');
+                    img.classList.add('entry-thumbnail');
+                    img.alt = 'Miniatura wpisu';
+                    img.src = row.__thumbnail_url;
+                    tdThumbnail.appendChild(img);
+                } else {
+                    tdThumbnail.textContent = '—';
+                }
+                tr.appendChild(tdThumbnail);
+
                 columns.forEach(col => {
                     const td = document.createElement('td');
                     td.className = col;
