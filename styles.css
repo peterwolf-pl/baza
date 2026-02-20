@@ -1,3 +1,9 @@
+@font-face {
+    font-family: 'GrohmanGrotesk';
+    src: url('gg.woff2') format('woff2');
+    font-display: swap;
+}
+
 /* Global base styles (from index.php) */
 body { font-family: Arial, sans-serif; padding: 20px; }
 .column-selector, .data-table { margin-top: 20px; }
@@ -90,8 +96,7 @@ button:focus { outline: none; }
 .footer-right a:hover { text-decoration: underline; }
 
 h1, h2, h3 {
-    font-family: GrohmanGrotesk;
-    src: url('/gg.woff2') format('woff2');
+    font-family: 'GrohmanGrotesk', Arial, sans-serif;
 }
 
 .lists-table, .entries-table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
