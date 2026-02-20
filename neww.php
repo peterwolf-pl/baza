@@ -34,7 +34,7 @@ $valid_columns = [
         ];
 
 // Obsługa formularza dodawania nowej karty
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_karta'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         
 
@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_karta'])) {
                 <input type="text" name="<?= $column ?>" id="<?= $column ?>">
             
         <?php endforeach; ?>
-        <input type="submit" value="Zapisz">
+        <input type="submit" name="add_karta" value="Zapisz">
     </form>
 
     <div class="footer-right">
