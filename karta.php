@@ -348,7 +348,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
 
 
     <div class="footer-right">
-        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2024
+        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
     </div>
 
     <script>

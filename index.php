@@ -119,7 +119,7 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
         </div>
     </div>
 <div class="header-links-left">
-    <button id="toggleButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
+    <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     
     <a role="button" id="toggleButton" href="neww.php">Nowy Wpis</a> 
     
@@ -154,7 +154,9 @@ $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['vi
             </tbody>
         </table>
     </div>
-
+    <div class="footer-right">
+        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
+    </div>
 <script>
 // przekazanie PHP -> JS dla opcji list
 const phpLists = <?php echo json_encode($lists); ?>;

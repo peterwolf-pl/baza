@@ -6,6 +6,11 @@ error_reporting(E_ALL);
 
 include 'db.php';
 
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit;
+}
+
 // Edycja nazwy listy
 if (isset($_POST['edit_list']) && isset($_POST['list_id'], $_POST['list_name'])) {
     $stmt = $pdo->prepare("UPDATE lists SET list_name = ? WHERE id = ?");

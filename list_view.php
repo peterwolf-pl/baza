@@ -495,7 +495,9 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
             <p class="message-error"><?php echo htmlspecialchars($bulkMoveError); ?></p>
         <?php endif; ?>
     </div>
-
+    <div class="footer-right">
+        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
+    </div>
     <script>
         // odśwież stan kolumn po SSR
         updateColumnDisplay();

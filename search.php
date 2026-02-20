@@ -594,6 +594,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query'])) {
                 <p>Brak przybliżonych wyników.</p>
             <?php endif; ?>
         </div>
+            <div class="footer-right">
+        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
+    </div>
         <script>
             updateColumnDisplay();
             highlightQuery("<?php echo htmlspecialchars($query_string); ?>", false);
