@@ -9,6 +9,39 @@ if (!isset($_SESSION['user_id'])) {
 // Połączenie z bazą danych
 include 'db.php';
 
+
+$collections = [
+    'ksiazki-artystyczne' => [
+        'main' => 'karta_ewidencyjna',
+        'log' => 'karta_ewidencyjna_log',
+        'moves' => 'karta_ewidencyjna_przemieszczenia',
+    ],
+    'kolekcja-maszyn' => [
+        'main' => 'karta_ewidencyjna_maszyny',
+        'log' => 'karta_ewidencyjna_maszyny_log',
+        'moves' => 'karta_ewidencyjna_maszyny_przemieszczenia',
+    ],
+    'kolekcja-matryc' => [
+        'main' => 'karta_ewidencyjna_matryce',
+        'log' => 'karta_ewidencyjna_matryce_log',
+        'moves' => 'karta_ewidencyjna_matryce_przemieszczenia',
+    ],
+    'biblioteka' => [
+        'main' => 'karta_ewidencyjna_bib',
+        'log' => 'karta_ewidencyjna_bib_log',
+        'moves' => 'karta_ewidencyjna_bib_przemieszczenia',
+    ],
+];
+
+$selectedCollection = $_GET['collection'] ?? 'ksiazki-artystyczne';
+if (!isset($collections[$selectedCollection])) {
+    $selectedCollection = 'ksiazki-artystyczne';
+}
+
+$mainTable = $collections[$selectedCollection]['main'];
+$logTable = $collections[$selectedCollection]['log'];
+$movesTable = $collections[$selectedCollection]['moves'];
+
 // Sprawdzenie, czy ID zostało przekazane w URL
 if (!isset($_GET['id'])) {
     die("Brak ID w zapytaniu.");
@@ -24,7 +57,7 @@ if (isset($_GET['search_return'])) {
 }
 
 // Pobranie danych karty ewidencyjnej
-$stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna WHERE ID = :id");
+$stmt = $pdo->prepare("SELECT * FROM {$mainTable} WHERE ID = :id");
 $stmt->execute(['id' => $id]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -37,13 +70,13 @@ $image_path = !empty($row['dokumentacja_wizualna'])
     ? 'https://mkalodz.pl/bazagfx/' . htmlspecialchars(str_replace("'", "", $row['dokumentacja_wizualna']))
     : null;
 
-function ensureMoveUsernameColumn(PDO $pdo): bool {
+function ensureMoveUsernameColumn(PDO $pdo, string $movesTable): bool {
     try {
-        $moveTableColumns = $pdo->query("SHOW COLUMNS FROM karta_ewidencyjna_przemieszczenia")
+        $moveTableColumns = $pdo->query("SHOW COLUMNS FROM {$movesTable}")
             ->fetchAll(PDO::FETCH_COLUMN);
 
         if (!in_array('user_username', $moveTableColumns, true)) {
-            $pdo->exec("ALTER TABLE karta_ewidencyjna_przemieszczenia ADD COLUMN user_username VARCHAR(255) NULL");
+            $pdo->exec("ALTER TABLE {$movesTable} ADD COLUMN user_username VARCHAR(255) NULL");
         }
 
         return true;
@@ -52,12 +85,12 @@ function ensureMoveUsernameColumn(PDO $pdo): bool {
     }
 }
 
-$hasMoveUsernameColumn = ensureMoveUsernameColumn($pdo);
+$hasMoveUsernameColumn = ensureMoveUsernameColumn($pdo, $movesTable);
 
-function getNextPrzemieszczenieNumber(PDO $pdo): string {
+function getNextPrzemieszczenieNumber(PDO $pdo, string $movesTable): string {
     $stmt = $pdo->query(
         "SELECT COALESCE(MAX(CAST(numer_przemieszczenia AS UNSIGNED)), 0) + 1
-         FROM karta_ewidencyjna_przemieszczenia
+         FROM {$movesTable}
          WHERE numer_przemieszczenia REGEXP '^[0-9]+$'"
     );
     return (string)$stmt->fetchColumn();
@@ -76,11 +109,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_przemieszczenie']
         $moveAddError = 'Uzupełnij pola wymagane: data i miejsce przemieszczenia.';
     } else {
         try {
-            $numerPrzemieszczenia = getNextPrzemieszczenieNumber($pdo);
+            $numerPrzemieszczenia = getNextPrzemieszczenieNumber($pdo, $movesTable);
 
             if ($hasMoveUsernameColumn) {
                 $insertStmt = $pdo->prepare(
-                    "INSERT INTO karta_ewidencyjna_przemieszczenia
+                    "INSERT INTO {$movesTable}
                     (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia, user_username)
                     VALUES (?, ?, ?, ?, ?, ?, ?)"
                 );
@@ -95,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_przemieszczenie']
                 ]);
             } else {
                 $insertStmt = $pdo->prepare(
-                    "INSERT INTO karta_ewidencyjna_przemieszczenia
+                    "INSERT INTO {$movesTable}
                     (karta_id, data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia)
                     VALUES (?, ?, ?, ?, ?, ?)"
                 );
@@ -143,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_karta'])) {
         }
 
         // Tworzenie zapytania SQL
-        $sql = "UPDATE karta_ewidencyjna SET " . 
+        $sql = "UPDATE {$mainTable} SET " . 
             implode(", ", array_map(fn($key) => "$key = :$key", array_keys($updated_data))) . 
             " WHERE ID = :id";
 
@@ -166,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_karta'])) {
         }
 
         if (!empty($changes)) {
-            $log_stmt = $pdo->prepare("INSERT INTO karta_ewidencyjna_log 
+            $log_stmt = $pdo->prepare("INSERT INTO {$logTable} 
                 (karta_id, user_username, changed_field, old_value, new_value, change_date) 
                 VALUES (:karta_id, :user_username, :changed_field, :old_value, :new_value, NOW())");
 
@@ -182,7 +215,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_karta'])) {
         }
 
         // Przeładuj stronę
-        header("Location: karta.php?id=" . $id);
+        header("Location: karta.php?id=" . $id . "&collection=" . urlencode($selectedCollection));
         exit;
 
     } catch (PDOException $e) {
@@ -198,15 +231,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_karta'])) {
 
 
 // Pobranie logów zmian
-$log_stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna_log WHERE karta_id = :id ORDER BY change_date DESC");
+$log_stmt = $pdo->prepare("SELECT * FROM {$logTable} WHERE karta_id = :id ORDER BY change_date DESC");
 $log_stmt->execute(['id' => $id]);
 $log_entries = $log_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Pobranie przemieszczeń
-$przemieszczenia_stmt = $pdo->prepare("SELECT * FROM karta_ewidencyjna_przemieszczenia WHERE karta_id = :id");
+$przemieszczenia_stmt = $pdo->prepare("SELECT * FROM {$movesTable} WHERE karta_id = :id");
 $przemieszczenia_stmt->execute(['id' => $id]);
 $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
-$nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
+$nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
 ?>
 
 <!DOCTYPE html>
@@ -224,7 +257,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo);
     </div>
 
             </div>
-    <a role="button" id="toggleButton" href="index.php">Powrót do listy</a>
+    <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Powrót do listy</a>
     <?php if ($searchReturnUrl !== ''): ?>
         <a role="button" id="toggleButton" href="<?php echo htmlspecialchars($searchReturnUrl); ?>">Powrót do wyszukiwania</a>
     <?php endif; ?>
