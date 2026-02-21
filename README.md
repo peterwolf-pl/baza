@@ -70,3 +70,36 @@ Prosta aplikacja webowa w PHP do prowadzenia ewidencji obiektów muzealnych i bi
 4. Umieść repozytorium w katalogu serwera i otwórz `login.php`.
 
 
+
+@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$
+@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$
+@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$
+@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$
+@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$@#$@#$@#$#@$
+
+
+
+
+APP SUMMARY: baza.mkal.pl Source basis: repository files in /Users/piotrek/Downloads/baza
+What it is
+A PHP + MySQL web app for managing catalog records of multiple Muzeum Ksiazki Ar tystycznej collections. It provides authenticated access to browse, search, edit, and track entries.
+Who it's for
+Primary users: museum staff and collection/documentation operators maintaining r ecords.
+What it does
+- Supports four collections via table mapping: ksiazki-artystyczne, kolekcja-mas
+zyn, kolekcja-matryc, biblioteka. - Authenticated browsing with lazy row loading and session-persisted visible col
+umns.
+- Search across table columns with normalized matching and saved search state UR
+Ls.
+- Record detail/edit (karta) with per-field change logging into dedicated *_log tables.
+- Movement tracking (przemieszczenia) for single records and bulk add from list view.
+- List management: create, rename, delete lists; add/remove entries per collecti
+on.
+- Mobile add flow: one-time QR token login, optional photo upload, thumbnail cre ation.
+How it works (repo evidence only) - UI/service layer: PHP page controllers render HTML (index.php, search.php, kar ta.php, list_view.php, mobile_add.php, admin.php). - Data layer: shared PDO connection in db.php; direct SQL in controllers; no ORM found.
+- Auth/session flow: login.php -> authenticate.php -> session checks on protecte d pages. - Collection routing maps to main/log/moves DB tables per selected collection. - Media flow stores uploads in gfx/ and generated thumbs in gfx/thumbs (GD-based ).
+- Admin panel (root login) supports user password changes and full SQL DB export
+.
+How to run (minimal)
+1. Configure database credentials in db.php. 2. Ensure MySQL schema/tables exist and PHP can write to gfx/ (uploads/thumbnail s).
+3. Serve the directory with PHP-capable web server and open /login.php. 4. Sign in with a user from karta_ewidencyjna_users. 5. Not found in repo: schema migration/setup scripts and an official local run c ommand.
