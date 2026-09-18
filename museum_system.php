@@ -619,7 +619,7 @@ function museumStoreUploadedImage(array $photo, string $destinationDir, string $
     }
 
     $targetName = $namePrefix . bin2hex(random_bytes(8)) . '.' . $mimeMap[$mime];
-    $targetPath = rtrim($destinationDir, '/\') . DIRECTORY_SEPARATOR . $targetName;
+    $targetPath = rtrim(str_replace('\\', '/', $destinationDir), '/') . '/' . $targetName;
     if (!move_uploaded_file($tmpName, $targetPath)) {
         throw new RuntimeException('Nie udało się zapisać zdjęcia na dysku.');
     }
