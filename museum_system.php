@@ -762,10 +762,15 @@ function museumListGfxSourceImages(): array
     return $out;
 }
 
-function museumListMissingThumbnails(): array
+function museumListMissingThumbnails(bool $skipKnownFailures = true): array
 {
     $missing = [];
+    $failures = $skipKnownFailures ? museumLoadMediaFailures() : [];
     foreach (museumListGfxSourceImages() as $item) {
+        $relative = (string)($item['relative'] ?? '');
+        if ($relative !== '' && isset($failures[$relative])) {
+            continue;
+        }
         if (!is_file((string)$item['thumb'])) {
             $missing[] = $item;
         }
@@ -827,11 +832,66 @@ function museumSanitizeGfxRelativePath(?string $raw): ?string
     return $relative;
 }
 
-function museumListMissingLocalOriginals(PDO $pdo): array
+function museumMediaFailureLogPath(): string
+{
+    $dir = __DIR__ . '/tmp';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0775, true);
+    }
+    return $dir . '/thumbnail_job_failures.json';
+}
+
+function museumLoadMediaFailures(): array
+{
+    $path = museumMediaFailureLogPath();
+    if (!is_file($path)) {
+        return [];
+    }
+    $raw = @file_get_contents($path);
+    $data = is_string($raw) ? json_decode($raw, true) : null;
+    return is_array($data) ? $data : [];
+}
+
+function museumSaveMediaFailures(array $failures): void
+{
+    @file_put_contents(
+        museumMediaFailureLogPath(),
+        json_encode($failures, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT),
+        LOCK_EX
+    );
+}
+
+function museumRememberMediaFailure(string $relative, string $kind, string $message): void
+{
+    $relative = ltrim(str_replace('\\', '/', $relative), '/');
+    if ($relative === '') {
+        return;
+    }
+    $failures = museumLoadMediaFailures();
+    $prev = is_array($failures[$relative] ?? null) ? $failures[$relative] : [];
+    $failures[$relative] = [
+        'kind' => $kind,
+        'message' => $message,
+        'count' => (int)($prev['count'] ?? 0) + 1,
+        'at' => date('c'),
+    ];
+    museumSaveMediaFailures($failures);
+}
+
+function museumClearMediaFailures(): void
+{
+    $path = museumMediaFailureLogPath();
+    if (is_file($path)) {
+        @unlink($path);
+    }
+}
+
+function museumListMissingLocalOriginals(PDO $pdo, bool $skipKnownFailures = true): array
 {
     $missing = [];
     $seen = [];
     $base = museumGfxBaseDir();
+    $failures = $skipKnownFailures ? museumLoadMediaFailures() : [];
 
     foreach (museumCollectionMainTables() as $collection => $table) {
         try {
@@ -847,7 +907,7 @@ function museumListMissingLocalOriginals(PDO $pdo): array
         }
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $relative = museumSanitizeGfxRelativePath(isset($row['dokumentacja_wizualna']) ? (string)$row['dokumentacja_wizualna'] : null);
-            if ($relative === null || isset($seen[$relative])) {
+            if ($relative === null || isset($seen[$relative]) || isset($failures[$relative])) {
                 continue;
             }
             $seen[$relative] = true;

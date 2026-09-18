@@ -45,17 +45,21 @@ $fetchMissing = false;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     appRequireCsrf();
     $fetchMissing = isset($_POST['fetch_missing']);
+    $action = (string)($_POST['action'] ?? 'generate');
     if (!userCanGenerateThumbnails()) {
         $errors[] = 'Brak uprawnień do generowania miniatur.';
+    } elseif ($action === 'clear_failures') {
+        museumClearMediaFailures();
+        $messages[] = 'Wyczyszczono listę pominiętych błędów. Kolejna próba znów je sprawdzi.';
     } elseif (!$gdAvailable) {
         $errors[] = 'Rozszerzenie PHP GD nie jest dostępne na serwerze.';
     } else {
-        @set_time_limit(120);
+        @set_time_limit(180);
         $batchSize = max(1, min(50, (int)($_POST['batch_size'] ?? 20)));
 
         if ($fetchMissing) {
-            $remoteMissing = museumListMissingLocalOriginals($pdo);
-            $fetchSlice = array_slice($remoteMissing, 0, min($batchSize, 15));
+            $remoteMissing = museumListMissingLocalOriginals($pdo, true);
+            $fetchSlice = array_slice($remoteMissing, 0, $batchSize);
             foreach ($fetchSlice as $item) {
                 $result = museumFetchAndStoreRemoteOriginal(
                     (string)($item['relative'] ?? ''),
@@ -66,6 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $fetchedOk++;
                 } else {
                     $fetchedFail++;
+                    museumRememberMediaFailure(
+                        (string)($result['file'] ?? ''),
+                        'fetch',
+                        (string)($result['message'] ?? 'błąd pobierania')
+                    );
                     appLogException(
                         'generate_thumbnails.php fetch ' . (string)($result['file'] ?? ''),
                         new RuntimeException((string)($result['message'] ?? 'błąd'))
@@ -73,14 +82,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             if ($fetchSlice === []) {
-                $messages[] = 'Nie znaleziono w bazie zdjęć, których brakuje w gfx/.';
+                $messages[] = 'Nie ma już zdjęć do pobrania (albo wszystkie pozostałe są na liście błędów).';
             } else {
                 $messages[] = 'Pobieranie: OK ' . $fetchedOk . ', błędów ' . $fetchedFail
-                    . ' (z ' . count($fetchSlice) . ').';
+                    . ' (z ' . count($fetchSlice) . '). Błędy zostaną pominięte w następnej partii.';
             }
         }
 
-        $missingBefore = museumListMissingThumbnails();
+        $missingBefore = museumListMissingThumbnails(true);
         $slice = array_slice($missingBefore, 0, $batchSize);
         if ($slice === []) {
             if (!$fetchMissing) {
@@ -94,6 +103,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $generatedOk++;
                 } else {
                     $generatedFail++;
+                    museumRememberMediaFailure(
+                        (string)($result['file'] ?? ''),
+                        'thumb',
+                        (string)($result['message'] ?? 'błąd miniatury')
+                    );
                     appLogException(
                         'generate_thumbnails.php ' . (string)($result['file'] ?? ''),
                         new RuntimeException((string)($result['message'] ?? 'błąd'))
@@ -105,21 +119,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 . ' (z ' . count($slice) . ' plików).';
         }
 
-        $stillMissingThumbs = count(museumListMissingThumbnails()) > 0;
-        $stillMissingRemote = $fetchMissing && count(museumListMissingLocalOriginals($pdo)) > 0;
-        $autoContinue = ($generatedFail + $fetchedFail) === 0
-            && ($stillMissingThumbs || $stillMissingRemote)
-            && isset($_POST['auto_continue']);
+        $stillMissingThumbs = count(museumListMissingThumbnails(true)) > 0;
+        $stillMissingRemote = $fetchMissing && count(museumListMissingLocalOriginals($pdo, true)) > 0;
+        $autoContinue = isset($_POST['auto_continue'])
+            && ($stillMissingThumbs || $stillMissingRemote);
     }
 }
 
 $sourceImages = [];
 $missing = [];
 $missingRemote = [];
+$mediaFailures = [];
 try {
     $sourceImages = museumListGfxSourceImages();
-    $missing = museumListMissingThumbnails();
-    $missingRemote = museumListMissingLocalOriginals($pdo);
+    $missing = museumListMissingThumbnails(true);
+    $missingRemote = museumListMissingLocalOriginals($pdo, true);
+    $mediaFailures = museumLoadMediaFailures();
 } catch (Throwable $e) {
     appLogException('generate_thumbnails.php scan', $e);
     $errors[] = 'Nie udało się przeskanować katalogu gfx/ albo bazy.';
@@ -128,9 +143,11 @@ try {
 $sourceCount = count($sourceImages);
 $missingCount = count($missing);
 $missingRemoteCount = count($missingRemote);
+$failureCount = count($mediaFailures);
 $existingCount = max(0, $sourceCount - $missingCount);
 $previewMissing = array_slice($missing, 0, 25);
 $previewRemote = array_slice($missingRemote, 0, 25);
+$previewFailures = array_slice($mediaFailures, 0, 25, true);
 $canRun = $gdAvailable && ($missingCount > 0 || $missingRemoteCount > 0);
 $esc = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 ?>
@@ -220,6 +237,10 @@ renderAppHeader([
                 <span class="thumbs-muted">Brak w gfx/ (są w bazie)</span>
                 <strong><?php echo (int)$missingRemoteCount; ?></strong>
             </div>
+            <div class="thumbs-stat">
+                <span class="thumbs-muted">Pominięte błędy</span>
+                <strong><?php echo (int)$failureCount; ?></strong>
+            </div>
         </div>
     </div>
 
@@ -231,11 +252,12 @@ renderAppHeader([
         <div class="thumbs-card">
             <h2>Uruchom generowanie</h2>
             <p class="thumbs-muted">
-                Partie po kilkanaście plików, żeby nie przekroczyć limitu czasu PHP.
-                Zaznacz automatyczną kontynuację, jeśli brakuje wielu plików.
+                Jedna partia to maksymalnie 50 plików. Błędy pobierania i miniatur są zapamiętywane
+                i pomijane w kolejnych próbach, aż wyczyścisz listę.
             </p>
             <form method="post" action="<?php echo $esc($pageHref); ?>" id="thumbsGenerateForm">
                 <?= appCsrfField() ?>
+                <input type="hidden" name="action" value="generate">
                 <input type="hidden" name="collection" value="<?php echo $esc($selectedCollection); ?>">
                 <div class="thumbs-actions">
                     <label for="batch_size">Partia</label>
@@ -253,10 +275,39 @@ renderAppHeader([
                     </button>
                 </div>
             </form>
-            <?php if ($missingCount === 0 && $missingRemoteCount === 0 && $sourceCount > 0): ?>
+            <?php if ($missingCount === 0 && $missingRemoteCount === 0 && $failureCount === 0 && $sourceCount > 0): ?>
                 <p class="thumbs-ok">Lokalne zdjęcia mają miniatury, a w gfx/ nie brakuje plików z bazy.</p>
+            <?php elseif ($missingCount === 0 && $missingRemoteCount === 0 && $failureCount > 0): ?>
+                <p class="thumbs-muted">Do zrobienia nic nie zostało — zostały tylko wcześniej zapisane błędy.</p>
             <?php endif; ?>
         </div>
+
+        <?php if ($previewFailures !== []): ?>
+            <div class="thumbs-card">
+                <h2>Pominięte po błędzie (<?php echo (int)$failureCount; ?>)</h2>
+                <p class="thumbs-muted">Te pliki nie będą ponawiane, dopóki nie wyczyścisz listy.</p>
+                <ul class="thumbs-list">
+                    <?php foreach ($previewFailures as $fileName => $info): ?>
+                        <li class="thumbs-error">
+                            <?php echo $esc($fileName); ?>
+                            — <?php echo $esc(is_array($info) ? (string)($info['message'] ?? '') : ''); ?>
+                            <?php if (is_array($info) && !empty($info['count'])): ?>
+                                (×<?php echo (int)$info['count']; ?>)
+                            <?php endif; ?>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php if ($failureCount > count($previewFailures)): ?>
+                    <p class="thumbs-muted">…i kolejne <?php echo (int)($failureCount - count($previewFailures)); ?> plików.</p>
+                <?php endif; ?>
+                <form method="post" action="<?php echo $esc($pageHref); ?>" class="thumbs-actions">
+                    <?= appCsrfField() ?>
+                    <input type="hidden" name="action" value="clear_failures">
+                    <input type="hidden" name="collection" value="<?php echo $esc($selectedCollection); ?>">
+                    <button type="submit">Wyczyść listę błędów i spróbuj ponownie</button>
+                </form>
+            </div>
+        <?php endif; ?>
 
         <?php if ($batchResults !== []): ?>
             <div class="thumbs-card">
