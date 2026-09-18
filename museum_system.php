@@ -74,6 +74,83 @@ function museumNormalizeImageReference(?string $rawValue): ?string
     return museumStripUrlQueryParam($normalized, 'ledger');
 }
 
+function museumFileExtensionVariants(string $path): array
+{
+    $path = str_replace('\\', '/', $path);
+    $dot = strrpos($path, '.');
+    $slash = strrpos($path, '/');
+    if ($dot === false || ($slash !== false && $dot < $slash) || $dot === strlen($path) - 1) {
+        return [$path];
+    }
+
+    $stem = substr($path, 0, $dot);
+    $ext = substr($path, $dot + 1);
+    $variants = [
+        $path,
+        $stem . '.' . strtolower($ext),
+        $stem . '.' . strtoupper($ext),
+    ];
+
+    return array_values(array_unique($variants));
+}
+
+function museumEncodeMediaPath(string $relativePath): string
+{
+    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
+    $segments = array_map('rawurlencode', array_values(array_filter(explode('/', $relativePath), 'strlen')));
+    return implode('/', $segments);
+}
+
+function museumBuildMediaUrls(?string $rawImageValue, string $collection = '', bool $asThumbnail = false): array
+{
+    $normalized = museumNormalizeImageReference($rawImageValue);
+    if ($normalized === null) {
+        return [];
+    }
+
+    if (preg_match('#^https?://#i', $normalized) === 1) {
+        return museumFileExtensionVariants($normalized);
+    }
+
+    $urls = [];
+    foreach (museumFileExtensionVariants(ltrim($normalized, '/')) as $variant) {
+        $encoded = museumEncodeMediaPath($variant);
+        if ($encoded === '') {
+            continue;
+        }
+        $relative = $asThumbnail ? ('thumbs/' . $encoded) : $encoded;
+        $bazaUrl = 'https://baza.mkal.pl/gfx/' . $relative;
+        $cdnUrl = 'https://mkalodz.pl/bazagfx/' . $relative;
+        if ($collection === 'ksiazki-artystyczne') {
+            $urls[] = $cdnUrl;
+            $urls[] = $bazaUrl;
+        } else {
+            $urls[] = $bazaUrl;
+            $urls[] = $cdnUrl;
+        }
+    }
+
+    return array_values(array_unique($urls));
+}
+
+function museumImgSrcFallbackAttributes(array $urls): string
+{
+    $urls = array_values(array_filter($urls, static fn($url): bool => is_string($url) && $url !== ''));
+    if ($urls === []) {
+        return '';
+    }
+
+    $primary = array_shift($urls);
+    $attr = 'src="' . htmlspecialchars($primary, ENT_QUOTES, 'UTF-8') . '"';
+    if ($urls !== []) {
+        $json = json_encode(array_values($urls), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $attr .= ' data-image-fallbacks="' . htmlspecialchars((string)$json, ENT_QUOTES, 'UTF-8') . '"';
+        $attr .= ' onerror="if(typeof museumNextImageFallback===\'function\'){museumNextImageFallback(this);}else{(function(el){try{var u=JSON.parse(el.getAttribute(\'data-image-fallbacks\')||\'[]\');if(!u.length){el.onerror=null;return;}var n=u.shift();el.setAttribute(\'data-image-fallbacks\',JSON.stringify(u));if(n){el.src=n;}else{el.onerror=null;}}catch(e){el.onerror=null;}})(this);}"';
+    }
+
+    return $attr;
+}
+
 function museumEan13ChecksumIsValid(string $ean13): bool
 {
     if (preg_match('/^[0-9]{13}$/', $ean13) !== 1) {
@@ -479,7 +556,21 @@ function museumSanitizeFilename(string $filename): string
     $basename = basename($filename);
     $sanitized = preg_replace('/[^A-Za-z0-9._-]/', '_', $basename);
     $sanitized = trim((string)$sanitized, '._-');
-    return $sanitized !== '' ? $sanitized : 'plik';
+    if ($sanitized === '') {
+        return 'plik';
+    }
+
+    $ext = strtolower((string)pathinfo($sanitized, PATHINFO_EXTENSION));
+    $stem = (string)pathinfo($sanitized, PATHINFO_FILENAME);
+    $stem = trim($stem, '._-');
+    if ($stem === '') {
+        $stem = 'plik';
+    }
+    if ($ext === '') {
+        return $stem;
+    }
+
+    return $stem . '.' . $ext;
 }
 
 function museumDetectMimeType(string $filePath): ?string

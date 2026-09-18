@@ -178,3 +178,25 @@ $footerOrganizationName = $organizationProfile['name'] !== '' ? $organizationPro
     }
 })();
 </script>
+<script>
+function museumNextImageFallback(img) {
+    if (!img) return;
+    let urls = [];
+    try {
+        urls = JSON.parse(img.getAttribute('data-image-fallbacks') || '[]');
+    } catch (e) {
+        urls = [];
+    }
+    if (!Array.isArray(urls) || urls.length === 0) {
+        img.onerror = null;
+        return;
+    }
+    const next = urls.shift();
+    img.setAttribute('data-image-fallbacks', JSON.stringify(urls));
+    if (next) {
+        img.src = next;
+    } else {
+        img.onerror = null;
+    }
+}
+</script>

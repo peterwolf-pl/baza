@@ -113,41 +113,9 @@ if (!isset($collections[$selectedCollection])) {
 $mainTable = $collections[$selectedCollection]['main'];
 
 
-function buildThumbPath(string $encodedPath): string {
-    return 'thumbs/' . ltrim($encodedPath, '/');
-}
-
 function buildImagePaths(?string $rawImageValue, string $collection): array {
-    $normalizedImageValue = museumNormalizeImageReference($rawImageValue);
-    if ($normalizedImageValue === null) {
-        return [null, null];
-    }
-
-    if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
-        return [$normalizedImageValue, null];
-    }
-
-    $relativeImagePath = ltrim($normalizedImageValue, '/');
-    $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
-
-    if (empty($encodedSegments)) {
-        return [null, null];
-    }
-
-    $encodedPath = implode('/', $encodedSegments);
-    $thumbPath = buildThumbPath($encodedPath);
-
-    if ($collection === 'ksiazki-artystyczne') {
-        return [
-            'https://mkalodz.pl/bazagfx/' . $thumbPath,
-            'https://baza.mkal.pl/gfx/' . $thumbPath,
-        ];
-    }
-
-    return [
-        'https://baza.mkal.pl/gfx/' . $thumbPath,
-        'https://mkalodz.pl/bazagfx/' . $thumbPath,
-    ];
+    $urls = museumBuildMediaUrls($rawImageValue, $collection, true);
+    return [$urls[0] ?? null, $urls[1] ?? null];
 }
 
 // AJAX: pobieranie wierszy
@@ -188,9 +156,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
             if (!$canFullDatabaseView) {
                 $row = appFilterPreviewRow($row);
             }
-            $thumbnailPaths = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection);
-            $row['__thumbnail_url'] = $thumbnailPaths[0];
-            $row['__thumbnail_fallback_url'] = $thumbnailPaths[1];
+            $thumbnailPaths = museumBuildMediaUrls($row['dokumentacja_wizualna'] ?? null, $selectedCollection, true);
+            $row['__thumbnail_url'] = $thumbnailPaths[0] ?? null;
+            $row['__thumbnail_fallback_url'] = $thumbnailPaths[1] ?? null;
+            $row['__thumbnail_urls'] = $thumbnailPaths;
             $row['__can_full_view'] = $canFullDatabaseView ? 1 : 0;
         }
         unset($row);
@@ -820,13 +789,13 @@ function loadRows() {
                     const img = document.createElement('img');
                     img.classList.add('entry-thumbnail');
                     img.alt = 'Miniatura wpisu';
-                    img.src = row.__thumbnail_url;
-                    if (row.__thumbnail_fallback_url) {
-                        img.onerror = () => {
-                            if (img.src !== row.__thumbnail_fallback_url) {
-                                img.src = row.__thumbnail_fallback_url;
-                            }
-                        };
+                    const thumbUrls = Array.isArray(row.__thumbnail_urls) && row.__thumbnail_urls.length
+                        ? row.__thumbnail_urls.filter(Boolean)
+                        : [row.__thumbnail_url, row.__thumbnail_fallback_url].filter(Boolean);
+                    img.src = thumbUrls[0];
+                    if (thumbUrls.length > 1) {
+                        img.setAttribute('data-image-fallbacks', JSON.stringify(thumbUrls.slice(1)));
+                        img.onerror = function () { museumNextImageFallback(img); };
                     }
                     if (hasValidRowId && rowHasFullView) {
                         const thumbLink = document.createElement('a');

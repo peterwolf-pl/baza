@@ -1,5 +1,6 @@
 <?php
 include 'db.php';
+require_once __DIR__ . '/museum_system.php';
 
 $collections = [
     'ksiazki-artystyczne' => [
@@ -83,31 +84,8 @@ function trackGrowthEvent(PDO $pdo, string $eventName, string $collection, ?int 
     }
 }
 
-function buildImagePaths(?string $rawImageValue): array {
-    if ($rawImageValue === null) {
-        return [null, null];
-    }
-
-    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
-    if ($normalizedImageValue === '') {
-        return [null, null];
-    }
-
-    if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
-        return [$normalizedImageValue, null];
-    }
-
-    $relativeImagePath = ltrim($normalizedImageValue, '/');
-    $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
-    if (empty($encodedSegments)) {
-        return [null, null];
-    }
-
-    $encodedPath = implode('/', $encodedSegments);
-    return [
-        'https://baza.mkal.pl/gfx/' . $encodedPath,
-        'https://mkalodz.pl/bazagfx/' . $encodedPath,
-    ];
+function buildImagePaths(?string $rawImageValue, string $collection = ''): array {
+    return museumBuildMediaUrls($rawImageValue, $collection, false);
 }
 
 ensureShareTables($pdo);
@@ -163,7 +141,9 @@ if (!preg_match('/^[a-f0-9]{32,64}$/', $token)) {
                 ['user_agent' => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255)]
             );
 
-            [$imagePath, $imageFallbackPath] = buildImagePaths($record['dokumentacja_wizualna'] ?? null);
+            $imageUrls = buildImagePaths($record['dokumentacja_wizualna'] ?? null, $selectedCollection);
+            $imagePath = $imageUrls[0] ?? null;
+            $imageFallbackPath = $imageUrls[1] ?? null;
             $movesStmt = $pdo->prepare(
                 "SELECT data_przemieszczenia, data_zwrotu, numer_przemieszczenia, miejsce_przemieszczenia, powod_cel_przemieszczenia
                  FROM {$movesTable}
@@ -451,7 +431,7 @@ if (!preg_match('/^[a-f0-9]{32,64}$/', $token)) {
                         </div>
                         <?php if ($field['key'] === 'dokumentacja_wizualna' && !empty($imagePath)): ?>
                             <div class="visual-wrap">
-                                <img src="<?php echo htmlspecialchars($imagePath); ?>" alt="Dokumentacja wizualna"<?php if (!empty($imageFallbackPath)): ?> onerror='if (this.src !== <?php echo json_encode($imageFallbackPath); ?>) this.src = <?php echo json_encode($imageFallbackPath); ?>;'<?php endif; ?>>
+                                <img <?php echo museumImgSrcFallbackAttributes($imageUrls ?? []); ?> alt="Dokumentacja wizualna">
                             </div>
                         <?php endif; ?>
                     </div>

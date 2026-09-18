@@ -218,24 +218,9 @@ if ($shareLinkSuccess === null && $latestShareLinkData !== null) {
 }
 
 // Pobranie ścieżki obrazka
-$image_path = null;
-$image_fallback_path = null;
-if (!empty($row['dokumentacja_wizualna'])) {
-    $normalizedImageValue = museumNormalizeImageReference((string)$row['dokumentacja_wizualna']);
-
-    if ($normalizedImageValue !== null) {
-        if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
-            $image_path = $normalizedImageValue;
-        } else {
-            $relativeImagePath = ltrim($normalizedImageValue, '/');
-            $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
-            $encodedPath = implode('/', $encodedSegments);
-
-            $image_path = 'https://baza.mkal.pl/gfx/' . $encodedPath;
-            $image_fallback_path = 'https://mkalodz.pl/bazagfx/' . $encodedPath;
-        }
-    }
-}
+$image_urls = museumBuildMediaUrls($row['dokumentacja_wizualna'] ?? null, $selectedCollection, false);
+$image_path = $image_urls[0] ?? null;
+$image_fallback_path = $image_urls[1] ?? null;
 
 if (!$canFullDatabaseView) {
     ?>
@@ -264,7 +249,7 @@ if (!$canFullDatabaseView) {
         <h2>Podgląd ograniczony</h2>
         <p>Masz dostęp tylko do miniatury/fotografii oraz podstawowych danych rekordu.</p>
         <?php if ($image_path): ?>
-            <p><img src="<?php echo htmlspecialchars($image_path); ?>" alt="Zdjęcie rekordu" style="max-width:100%;height:auto;" onerror="this.onerror=null;<?php echo $image_fallback_path ? 'this.src=' . json_encode($image_fallback_path) . ';' : ''; ?>"></p>
+            <p><img <?php echo museumImgSrcFallbackAttributes($image_urls); ?> alt="Zdjęcie rekordu" style="max-width:100%;height:auto;"></p>
         <?php endif; ?>
         <table>
             <tr><th>Tytuł / nazwa</th><td><?php echo htmlspecialchars((string)($row['nazwa_tytul'] ?? '')); ?></td></tr>
@@ -824,7 +809,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php if ($image_path): ?>
             <tr>
                 <td colspan="2">
-                    <img src="<?= htmlspecialchars($image_path) ?>" alt="Obrazek obiektu" width="600"<?php if ($image_fallback_path): ?> onerror='if (this.src !== <?= json_encode($image_fallback_path) ?>) this.src = <?= json_encode($image_fallback_path) ?>;'<?php endif; ?>>
+                    <img <?php echo museumImgSrcFallbackAttributes($image_urls); ?> alt="Obrazek obiektu" width="600">
                 </td>
             </tr>
         <?php endif; ?>

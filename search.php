@@ -106,41 +106,9 @@ function normalizeSearchQuery($text) {
     return trim($t);
 }
 
-function buildThumbPath(string $encodedPath): string {
-    return 'thumbs/' . ltrim($encodedPath, '/');
-}
-
 function buildImagePaths(?string $rawImageValue, string $collection): array {
-    $normalizedImageValue = museumNormalizeImageReference($rawImageValue);
-    if ($normalizedImageValue === null) {
-        return [null, null];
-    }
-
-    if (preg_match('#^https?://#i', $normalizedImageValue) === 1) {
-        return [$normalizedImageValue, null];
-    }
-
-    $relativeImagePath = ltrim($normalizedImageValue, '/');
-    $encodedSegments = array_map('rawurlencode', array_filter(explode('/', $relativeImagePath), 'strlen'));
-
-    if (empty($encodedSegments)) {
-        return [null, null];
-    }
-
-    $encodedPath = implode('/', $encodedSegments);
-    $thumbPath = buildThumbPath($encodedPath);
-
-    if ($collection === 'ksiazki-artystyczne') {
-        return [
-            'https://mkalodz.pl/bazagfx/' . $thumbPath,
-            'https://baza.mkal.pl/gfx/' . $thumbPath,
-        ];
-    }
-
-    return [
-        'https://baza.mkal.pl/gfx/' . $thumbPath,
-        'https://mkalodz.pl/bazagfx/' . $thumbPath,
-    ];
+    $urls = museumBuildMediaUrls($rawImageValue, $collection, true);
+    return [$urls[0] ?? null, $urls[1] ?? null];
 }
 function sqlFoldExpr($field) {
     $expr = "LOWER(CAST($field AS CHAR))";
@@ -619,9 +587,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                                     <input type="checkbox" class="row-select" data-entry-id="<?php echo (int)$entryId; ?>" onclick="toggleRowSelection(this)" <?php echo $rowCollection === $selectedCollection ? '' : 'disabled'; ?>>
                                 </td>
                                 <td class="entry-thumbnail-cell thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">
-                                    <?php [$thumbnailUrl, $thumbnailFallbackUrl] = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $rowCollection); ?>
-                                    <?php if ($thumbnailUrl !== null): ?>
-                                        <img class="entry-thumbnail" src="<?php echo htmlspecialchars($thumbnailUrl); ?>" alt="Miniatura wpisu"<?php if ($thumbnailFallbackUrl !== null): ?> onerror="if (this.src !== <?php echo json_encode($thumbnailFallbackUrl); ?>) this.src = <?php echo json_encode($thumbnailFallbackUrl); ?>;"<?php endif; ?>>
+                                    <?php $thumbnailUrls = museumBuildMediaUrls($row['dokumentacja_wizualna'] ?? null, $rowCollection, true); ?>
+                                    <?php if ($thumbnailUrls !== []): ?>
+                                        <img class="entry-thumbnail" <?php echo museumImgSrcFallbackAttributes($thumbnailUrls); ?> alt="Miniatura wpisu">
                                     <?php else: ?>
                                         <span>—</span>
                                     <?php endif; ?>

@@ -177,8 +177,8 @@ function storeMobilePhoto(array $photo): ?string {
     }
 
     $originalName = basename($photo['name']);
-    $safeName = preg_replace('/[^A-Za-z0-9._-]/', '_', $originalName);
-    $safeName = $safeName ?: ('zdjecie_' . date('Ymd_His') . '.jpg');
+    $safeName = museumSanitizeFilename($originalName);
+    $safeName = $safeName !== '' ? $safeName : ('zdjecie_' . date('Ymd_His') . '.jpg');
     $targetName = uniqid('mobile_', true) . '_' . $safeName;
     $targetPath = $uploadDir . '/' . $targetName;
     $thumbPath = $thumbDir . '/' . $targetName;
