@@ -1,6 +1,6 @@
 Options -Indexes
 
-<FilesMatch "^(db_config|db|app_settings|museum_system|header|footer)\.php$">
+<FilesMatch "^(db_config|db|app_settings|museum_system|header|footer|auth|vanna_integration)\.php$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>

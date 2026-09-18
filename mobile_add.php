@@ -2,10 +2,11 @@
 session_start();
 
 include 'db.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 
 function userCanCreateEntries(): bool {
-    return !empty($_SESSION['can_inventory_entries']);
+    return userCan('inventory_entries');
 }
 
 $collections = [
@@ -214,20 +215,18 @@ if (!isset($_SESSION['user_id']) && isset($_GET['token'])) {
     $tokenData = $tokenStmt->fetch(PDO::FETCH_ASSOC);
 
     if ($tokenData) {
-        $_SESSION['user_id'] = (int)$tokenData['user_id'];
-        $_SESSION['username'] = $tokenData['username'];
-        $permStmt = $pdo->prepare('SELECT can_inventory_entries, can_update_records, can_manage_deposits, can_generate_reports FROM karta_ewidencyjna_users WHERE id = :id LIMIT 1');
+        $permStmt = $pdo->prepare('SELECT * FROM karta_ewidencyjna_users WHERE id = :id LIMIT 1');
         $permStmt->execute(['id' => (int)$tokenData['user_id']]);
         $permUser = $permStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-        $_SESSION['can_inventory_entries'] = (int)($permUser['can_inventory_entries'] ?? 0);
-        $_SESSION['can_update_records'] = (int)($permUser['can_update_records'] ?? 0);
-        $_SESSION['can_manage_deposits'] = (int)($permUser['can_manage_deposits'] ?? 0);
-        $_SESSION['can_generate_reports'] = (int)($permUser['can_generate_reports'] ?? 0);
+        $permUser['id'] = (int)$tokenData['user_id'];
+        $permUser['username'] = (string)($permUser['username'] ?? $tokenData['username']);
+        session_regenerate_id(true);
+        appApplyUserSession($permUser);
 
         $markUsed = $pdo->prepare('UPDATE mobile_login_tokens SET used = 1 WHERE token = :token');
         $markUsed->execute(['token' => $token]);
 
-        header('Location: mobile_add.php?collection=' . urlencode($tokenData['collection']) . '&mobile=1');
+        header('Location: mobile_add.php?collection=' . urlencode($tokenData['collection']) . '&ledger=' . urlencode(appSelectedLedger()) . '&mobile=1');
         exit;
     }
 
@@ -241,7 +240,7 @@ if (!isset($_SESSION['user_id'])) {
 
 if (isset($_GET['clear_series'])) {
     unset($_SESSION['mobile_add_series']);
-    header('Location: mobile_add.php?collection=' . urlencode($selectedCollection) . '&mobile=1');
+    header('Location: mobile_add.php?collection=' . urlencode($selectedCollection) . '&ledger=' . urlencode(appSelectedLedger()) . '&mobile=1');
     exit;
 }
 
@@ -354,12 +353,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $series['entries'] = array_merge($series['entries'], $created);
                     $_SESSION['mobile_add_series'] = $series;
 
-                    header('Location: mobile_add.php?collection=' . urlencode($selectedCollection) . '&mobile=1&saved=1');
+                    header('Location: mobile_add.php?collection=' . urlencode($selectedCollection) . '&ledger=' . urlencode(appSelectedLedger()) . '&mobile=1&saved=1');
                     exit;
                 }
 
                 $last = $created[count($created) - 1];
-                header('Location: karta.php?id=' . (int)$last['id'] . '&collection=' . urlencode($selectedCollection) . '&from_mobile_add=1');
+                header('Location: karta.php?id=' . (int)$last['id'] . '&collection=' . urlencode($selectedCollection) . '&ledger=' . urlencode(appSelectedLedger()) . '&from_mobile_add=1');
                 exit;
             } catch (PDOException $e) {
                 if (($e->getCode() ?? '') === '23000' && museumIsInventoryNumberConstraintViolation($e)) {

@@ -8,6 +8,7 @@ if (!isset($_SESSION['user_id'])) {
 
 // Połączenie z bazą danych
 include 'db.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
@@ -49,8 +50,10 @@ $mainTable = $collections[$selectedCollection]['main'];
 $logTable = $collections[$selectedCollection]['log'];
 $movesTable = $collections[$selectedCollection]['moves'];
 $username = $_SESSION['username'] ?? '';
-$canUpdateRecords = !empty($_SESSION['can_update_records']);
-$canFullDatabaseView = !empty($_SESSION['can_full_database_view']) || !empty($_SESSION['is_root']);
+$canUpdateRecords = userCan('update_records');
+$canFullDatabaseView = userCan('full_view');
+$canMoveRecords = userCan('move_records');
+$selectedLedger = appSelectedLedger();
 
 function ensureShareTables(PDO $pdo): void {
     $pdo->exec(
@@ -108,17 +111,7 @@ function trackGrowthEvent(PDO $pdo, string $eventName, string $collection, ?int 
 }
 
 function buildAbsoluteAppUrl(string $fileName, array $query = []): string {
-    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['PHP_SELF'] ?? '')), '/');
-    $path = ($basePath === '' ? '' : $basePath) . '/' . ltrim($fileName, '/');
-    $url = $scheme . '://' . $host . $path;
-
-    if (!empty($query)) {
-        $url .= '?' . http_build_query($query);
-    }
-
-    return $url;
+    return appPublicUrl($fileName, $query);
 }
 
 function findLatestActiveShareLink(PDO $pdo, string $collection, int $recordId): ?array {
@@ -181,6 +174,10 @@ $shareLinkSuccess = null;
 $shareLinkExpiresAt = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_share_link'])) {
+    if (!$canFullDatabaseView) {
+        http_response_code(403);
+        die('Brak uprawnień do tworzenia linku publicznego.');
+    }
     try {
         $shareToken = bin2hex(random_bytes(24));
         $shareExpiresAt = date('Y-m-d H:i:s', strtotime('+14 days'));
@@ -207,7 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_share_link']))
             ['expires_at' => $shareExpiresAt]
         );
 
-        $shareLinkSuccess = buildAbsoluteAppUrl('share.php', ['t' => $shareToken]);
+        $shareLinkSuccess = buildAbsoluteAppUrl('share.php', ['t' => $shareToken, 'ledger' => $selectedLedger]);
         $shareLinkExpiresAt = $shareExpiresAt;
     } catch (Throwable $e) {
         $shareLinkError = 'Nie udało się wygenerować linku publicznego.';
@@ -216,7 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_share_link']))
 
 $latestShareLinkData = findLatestActiveShareLink($pdo, $selectedCollection, $id);
 if ($shareLinkSuccess === null && $latestShareLinkData !== null) {
-    $shareLinkSuccess = buildAbsoluteAppUrl('share.php', ['t' => $latestShareLinkData['token']]);
+    $shareLinkSuccess = buildAbsoluteAppUrl('share.php', ['t' => $latestShareLinkData['token'], 'ledger' => $selectedLedger]);
     $shareLinkExpiresAt = $latestShareLinkData['expires_at'] ?? null;
 }
 
@@ -259,7 +256,7 @@ if (!$canFullDatabaseView) {
         'showColumnButton' => false,
         'showListEditor' => false,
         'primaryActions' => [
-            ['label' => 'Powrót do listy', 'href' => 'index.php?collection=' . rawurlencode($selectedCollection)],
+            ['label' => 'Powrót do listy', 'href' => 'index.php?collection=' . rawurlencode($selectedCollection) . '&ledger=' . rawurlencode($selectedLedger)],
         ],
     ]);
     ?>
@@ -348,6 +345,10 @@ function fetchAttachmentForRecord(PDO $pdo, int $attachmentId, string $collectio
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_przemieszczenie'])) {
+    if (!$canMoveRecords) {
+        http_response_code(403);
+        die('Brak uprawnień do dodawania przemieszczeń.');
+    }
     $dataPrzemieszczenia = trim($_POST['data_przemieszczenia'] ?? '');
     $dataZwrotu = trim($_POST['data_zwrotu'] ?? '');
     $miejscePrzemieszczenia = trim($_POST['miejsce_przemieszczenia'] ?? '');
@@ -611,8 +612,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_karta'])) {
             'wymiary', 'cechy_charakterystyczne', 'dane_o_dokumentacji_wizualnej', 
             'wlasciciel', 'sposob_oznakowania', 'autorskie_prawa_majatkowe', 
             'kontrola_zbiorow', 'wartosc_w_dniu_nabycia', 'wartosc_w_dniu_sporzadzenia', 
-            'miejsce_przechowywania', 'uwagi', 'data_opracowania', 'opracowujacy', 
-            'przemieszczenia'
+            'miejsce_przechowywania', 'uwagi', 'data_opracowania', 'opracowujacy'
         ];
 
         $postedInventoryNumber = isset($_POST['numer_ewidencyjny']) ? trim((string)$_POST['numer_ewidencyjny']) : null;
@@ -652,7 +652,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_karta'])) {
         // Logowanie zmian
         $changes = [];
         foreach ($updated_data as $key => $new_value) {
-            if ($row[$key] != $new_value) {
+            if ($key === 'id' || $key === 'ID') {
+                continue;
+            }
+            if (($row[$key] ?? null) != $new_value) {
                 $changes[] = [
                     'field' => $key,
                     'old_value' => $row[$key],
@@ -678,7 +681,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_karta'])) {
         }
 
         // Przeładuj stronę
-        header("Location: karta.php?id=" . $id . "&collection=" . urlencode($selectedCollection));
+        header("Location: karta.php?id=" . $id . "&collection=" . urlencode($selectedCollection) . "&ledger=" . urlencode($selectedLedger));
         exit;
 
     } catch (PDOException $e) {
@@ -1085,6 +1088,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 <br><br>
 
+   <?php if ($canMoveRecords): ?>
    <h3>Dodaj nowe przemieszczenie:</h3>
         <form method="post" class="add-form">
             <input type="hidden" name="add_przemieszczenie" value="1">
@@ -1105,6 +1109,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
 
             <button id="togglePrzemieszczeniaButton" type="submit">Dodaj</button>
         </form>
+   <?php endif; ?>
 
         <?php if ($moveAddSuccess): ?>
             <p class="message-success"><?= htmlspecialchars($moveAddSuccess) ?></p>

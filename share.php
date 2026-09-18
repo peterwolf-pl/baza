@@ -401,17 +401,24 @@ if (!preg_match('/^[a-f0-9]{32,64}$/', $token)) {
             ['nr' => '13', 'label' => 'Wymiary', 'key' => 'wymiary', 'class' => 'field-4'],
             ['nr' => '14', 'label' => 'Cechy charakterystyczne', 'key' => 'cechy_charakterystyczne', 'class' => 'field-8'],
             ['nr' => '15', 'label' => 'Dane o dokumentacji wizualnej', 'key' => 'dane_o_dokumentacji_wizualnej', 'class' => 'field-4'],
-            ['nr' => '16', 'label' => 'Właściciel', 'key' => 'wlasciciel', 'class' => 'field-4'],
-            ['nr' => '17', 'label' => 'Sposób oznakowania', 'key' => 'sposob_oznakowania', 'class' => 'field-4'],
-            ['nr' => '18', 'label' => 'Autorskie prawa majątkowe', 'key' => 'autorskie_prawa_majatkowe', 'class' => 'field-4'],
-            ['nr' => '19', 'label' => 'Kontrola zbiorów', 'key' => 'kontrola_zbiorow', 'class' => 'field-4'],
-            ['nr' => '20', 'label' => 'Miejsce przechowywania', 'key' => 'miejsce_przechowywania', 'class' => 'field-4'],
-            ['nr' => '21', 'label' => 'Wartość w dniu nabycia', 'key' => 'wartosc_w_dniu_nabycia', 'class' => 'field-4'],
-            ['nr' => '22', 'label' => 'Wartość w dniu sporządzenia', 'key' => 'wartosc_w_dniu_sporzadzenia', 'class' => 'field-4'],
-            ['nr' => '23', 'label' => 'Uwagi', 'key' => 'uwagi', 'class' => 'field-8'],
-            ['nr' => '24', 'label' => 'Data opracowania', 'key' => 'data_opracowania', 'class' => 'field-4'],
-            ['nr' => '25', 'label' => 'Opracowujący', 'key' => 'opracowujacy', 'class' => 'field-4'],
+            ['nr' => '16', 'label' => 'Sposób oznakowania', 'key' => 'sposob_oznakowania', 'class' => 'field-4'],
+            ['nr' => '17', 'label' => 'Data opracowania', 'key' => 'data_opracowania', 'class' => 'field-4'],
         ];
+        $publicHiddenKeys = [
+            'wlasciciel',
+            'wartosc_w_dniu_nabycia',
+            'wartosc_w_dniu_sporzadzenia',
+            'miejsce_przechowywania',
+            'uwagi',
+            'autorskie_prawa_majatkowe',
+            'kontrola_zbiorow',
+            'pochodzenie',
+            'opracowujacy',
+        ];
+        $fieldMap = array_values(array_filter(
+            $fieldMap,
+            static fn(array $field): bool => !in_array((string)$field['key'], $publicHiddenKeys, true)
+        ));
         ?>
         <div class="sheet">
             <div class="sheet-header">
@@ -452,36 +459,7 @@ if (!preg_match('/^[a-f0-9]{32,64}$/', $token)) {
             </div>
 
             <div class="moves-section">
-                <h2>26. Przemieszczenia obiektu o nr. ewidencyjnym <?php echo htmlspecialchars((string)($record['numer_ewidencyjny'] ?? '')); ?></h2>
-                <table class="moves-table">
-                    <thead>
-                        <tr>
-                            <th>Data przemieszczenia</th>
-                            <th>Data zwrotu</th>
-                            <th>Numer przemieszczenia</th>
-                            <th>Miejsce przemieszczenia</th>
-                            <th>Powód/cel przemieszczenia</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (!empty($movesRows)): ?>
-                            <?php foreach ($movesRows as $move): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars((string)($move['data_przemieszczenia'] ?? '')); ?></td>
-                                    <td><?php echo htmlspecialchars((string)($move['data_zwrotu'] ?? '')); ?></td>
-                                    <td><?php echo htmlspecialchars((string)($move['numer_przemieszczenia'] ?? '')); ?></td>
-                                    <td><?php echo htmlspecialchars((string)($move['miejsce_przemieszczenia'] ?? '')); ?></td>
-                                    <td><?php echo nl2br(htmlspecialchars((string)($move['powod_cel_przemieszczenia'] ?? ''))); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php else: ?>
-                            <tr>
-                                <td colspan="5">&nbsp;</td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-                <p class="public-note">Dokument wygenerowany z publicznego linku udostępniania.</p>
+                <p class="public-note">Historia przemieszczeń i dane wrażliwe (wartość, właściciel, miejsce przechowywania) nie są publikowane w linku publicznym.</p>
             </div>
         </div>
     <?php endif; ?>

@@ -7,12 +7,13 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 include 'db.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
 function eanLabelsCanGenerate(): bool
 {
-    return !empty($_SESSION['can_inventory_entries']) || !empty($_SESSION['is_root']);
+    return userCan('inventory_entries');
 }
 
 function eanLabelsCollections(): array

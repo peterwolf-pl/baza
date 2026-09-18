@@ -10,8 +10,10 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
+require_once __DIR__ . '/auth.php';
 $username = $_SESSION['username'] ?? '';
-$canFullDatabaseView = !empty($_SESSION['can_full_database_view']) || !empty($_SESSION['is_root']);
+$canFullDatabaseView = userCan('full_view');
+$canEditLists = userCan('edit_lists');
 
 // Zsynchronizuj wybór księgi przed cache HIT. Inaczej przy cache trafieniu db.php się nie wykona
 // i sesja może zostać na poprzedniej księdze.
@@ -182,10 +184,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
         $stmt = $pdo->query($selectSql);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $allowedPreviewColumns = ['ID', 'nazwa_tytul', 'autor_wytworca', 'dokumentacja_wizualna'];
         foreach ($rows as &$row) {
             if (!$canFullDatabaseView) {
-                $row = array_intersect_key($row, array_flip($allowedPreviewColumns));
+                $row = appFilterPreviewRow($row);
             }
             $thumbnailPaths = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection);
             $row['__thumbnail_url'] = $thumbnailPaths[0];
@@ -312,10 +313,10 @@ $thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SE
         </label>
         <?php foreach ($columns as $col): ?>
             <label>
-                <input type="checkbox" class="column-checkbox" value="<?php echo $col; ?>" 
-                       onclick="toggleColumn('<?php echo $col; ?>')" 
+                <input type="checkbox" class="column-checkbox" value="<?php echo htmlspecialchars($col, ENT_QUOTES, 'UTF-8'); ?>" 
+                       onclick="toggleColumn('<?php echo htmlspecialchars($col, ENT_QUOTES, 'UTF-8'); ?>')" 
                        <?php echo in_array($col, $selectedColumns) ? 'checked' : ''; ?>>
-                <?php echo $col; ?>
+                <?php echo htmlspecialchars($col, ENT_QUOTES, 'UTF-8'); ?>
             </label>
         <?php endforeach; ?>
     </div>
@@ -329,9 +330,9 @@ $thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SE
                     </th>
                     <th id="thumbnailHeader" class="thumbnail-col" style="display: <?php echo $showThumbnailColumn ? "" : "none"; ?>;">Miniatura foto</th>
                     <?php foreach ($columns as $col): ?>
-                        <th class="<?php echo $col; ?>" 
+                        <th class="<?php echo htmlspecialchars($col, ENT_QUOTES, 'UTF-8'); ?>" 
                             style="display: <?php echo in_array($col, $selectedColumns) ? '' : 'none'; ?>;">
-                            <?php echo $col; ?>
+                            <?php echo htmlspecialchars($col, ENT_QUOTES, 'UTF-8'); ?>
                         </th>
                     <?php endforeach; ?>
                     <th>Opcje</th>
@@ -351,8 +352,9 @@ $thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SE
 // przekazanie PHP -> JS dla opcji list
 const phpLists = <?php echo json_encode($lists); ?>;
 const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
+const selectedLedger = <?php echo json_encode((string)($GLOBALS['app_selected_ledger'] ?? 'depozytowa')); ?>;
 const canFullDatabaseView = <?php echo json_encode((bool)$canFullDatabaseView); ?>;
-const canEditLists = <?php echo json_encode((bool)(!empty($_SESSION['can_edit_lists']) || !empty($_SESSION['is_root']))); ?>;
+const canEditLists = <?php echo json_encode((bool)$canEditLists); ?>;
 
 // Kolumny widoczne na start
 const defaultVisibleColumns = <?php echo json_encode($selectedColumns); ?>;
@@ -412,7 +414,7 @@ function persistVisibleColumns() {
         visibleColumns.push(cb.value);
     });
 
-    fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=save_visible_columns`, {
+    fetch(`?collection=${encodeURIComponent(selectedCollection)}&ledger=${encodeURIComponent(selectedLedger)}&action=save_visible_columns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ visible_columns: visibleColumns, show_thumbnail_column: showThumbnailColumn, thumbnail_size: thumbnailSizePx })
@@ -712,12 +714,18 @@ function startLoadAndCache() {
 }
 
 // Generuj <option> list na podstawie phpLists
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, function (char) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
+    });
+}
+
 function getListOptionsHtml() {
     let html = `<option value="">Dodaj do listy</option>
                 <option value="new">+ Nowa lista</option>
                 <option disabled>──────────</option>`;
     phpLists.forEach(list => {
-        html += `<option value="${list.id}">${list.list_name}</option>`;
+        html += `<option value="${Number(list.id)}">${escapeHtml(list.list_name)}</option>`;
     });
     return html;
 }
@@ -752,7 +760,7 @@ function loadRows() {
     if (loading || noMoreRows) return;
     loading = true;
 
-    fetch(`?collection=${encodeURIComponent(selectedCollection)}&action=fetch_rows&offset=${offset}`)
+    fetch(`?collection=${encodeURIComponent(selectedCollection)}&ledger=${encodeURIComponent(selectedLedger)}&action=fetch_rows&offset=${offset}`)
         .then(async response => {
             if (!response.ok) {
                 const text = await response.text();
@@ -840,7 +848,7 @@ function loadRows() {
                     const th = document.querySelector(`th.${col}`);
                     td.style.display = th && th.style.display === 'none' ? 'none' : '';
                     // null/undefined na pusty string
-                    td.textContent = (row[col] === null || row[col] === undefined) ? '' : (row[col] + '').replace(/'/g, "");
+                    td.textContent = (row[col] === null || row[col] === undefined) ? '' : String(row[col]);
                     tr.appendChild(td);
                 });
 

@@ -4,6 +4,7 @@ ini_set('display_startup_errors', '0');
 ini_set('log_errors', '1');
 error_reporting(E_ALL);
 session_start();
+require_once __DIR__ . '/auth.php';
 include 'db.php';
 
 function ensureUserPermissionColumns(PDO $pdo): void
@@ -54,17 +55,7 @@ $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if ($user && password_verify($password, $user['password_hash'])) {
     session_regenerate_id(true);
-    $_SESSION['user_id'] = $user['id'];
-    $_SESSION['username'] = $user['username'];
-    $_SESSION['email'] = (string)($user['email'] ?? '');
-    $_SESSION['can_full_database_view'] = (int)($user['can_full_database_view'] ?? 0);
-    $_SESSION['can_edit_lists'] = (int)($user['can_edit_lists'] ?? 0);
-    $_SESSION['is_root'] = (int)($user['is_root'] ?? 0);
-    $_SESSION['can_inventory_entries'] = (int)($user['can_inventory_entries'] ?? 0);
-    $_SESSION['can_update_records'] = (int)($user['can_update_records'] ?? 0);
-    $_SESSION['can_manage_deposits'] = (int)($user['can_manage_deposits'] ?? 0);
-    $_SESSION['can_generate_reports'] = (int)($user['can_generate_reports'] ?? 0);
-
+    appApplyUserSession($user);
     header('Location: /index.php');
     exit;
 }

@@ -8,10 +8,11 @@ if (!isset($_SESSION['user_id'])) {
 
 // Połączenie z bazą danych
 include 'db.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 
 function userCanCreateEntries(): bool {
-    return !empty($_SESSION['can_inventory_entries']);
+    return userCan('inventory_entries');
 }
 
 $collections = [
@@ -119,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'new_value' => 'Utworzenie wpisu',
         ]);
 
-        header("Location: karta.php?id=" . $newId . "&collection=" . urlencode($selectedCollection));
+        header("Location: karta.php?id=" . $newId . "&collection=" . urlencode($selectedCollection) . "&ledger=" . urlencode(appSelectedLedger()));
         exit;
     } catch (PDOException $e) {
         if (($e->getCode() ?? '') === '23000' && museumIsInventoryNumberConstraintViolation($e)) {

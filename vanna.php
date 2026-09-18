@@ -1,7 +1,8 @@
 <?php
 session_start();
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
 error_reporting(E_ALL);
 
 if (!isset($_SESSION['user_id'])) {
@@ -53,7 +54,8 @@ if (!isset($collections[$selectedCollection])) {
 
 $selectedLedger = (string)($GLOBALS['app_selected_ledger'] ?? ($_SESSION['selected_ledger'] ?? 'depozytowa'));
 $pageHref = 'vanna.php?collection=' . rawurlencode($selectedCollection) . '&ledger=' . rawurlencode($selectedLedger);
-$canUseVanna = !empty($_SESSION['can_full_database_view']) || !empty($_SESSION['is_root']);
+require_once __DIR__ . '/auth.php';
+$canUseVanna = userCan('full_view');
 $runtimeConfig = vannaGetRuntimeConfig();
 $currentUserId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
 
@@ -507,7 +509,7 @@ renderAppHeader([
             <p>Jesli Vanna nie dodala LIMIT, aplikacja dopiela bezpieczny LIMIT 100.</p>
         <?php endif; ?>
 
-        <?php if ($debugMessage !== ''): ?>
+        <?php if ($debugMessage !== '' && userIsRoot()): ?>
             <details class="vanna-debug">
                 <summary>Detale techniczne</summary>
                 <pre><code><?php echo $esc($debugMessage); ?></code></pre>

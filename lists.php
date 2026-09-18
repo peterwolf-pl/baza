@@ -12,7 +12,8 @@ if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
-if (empty($_SESSION['can_edit_lists']) && empty($_SESSION['is_root'])) {
+require_once __DIR__ . '/auth.php';
+if (!userCan('edit_lists')) {
     http_response_code(403);
     echo 'Brak uprawnień do edycji list.';
     exit;

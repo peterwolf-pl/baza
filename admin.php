@@ -1,8 +1,10 @@
 <?php
 session_start();
+require_once __DIR__ . '/auth.php';
 include 'db.php';
 require_once __DIR__ . '/app_settings.php';
 require_once __DIR__ . '/museum_system.php';
+appEnsureCsrfToken();
 
 function h($value) {
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
@@ -93,19 +95,25 @@ if (isset($_GET['logout_admin'])) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
+    if (!appVerifyCsrf()) {
+        $message = 'Nieprawidłowy token CSRF. Odśwież stronę i spróbuj ponownie.';
+        $action = '';
+    }
 
     if ($action === 'admin_login') {
-        $username = trim($_POST['username'] ?? '');
-        $password = trim($_POST['password'] ?? '');
+        $username = trim((string)($_POST['username'] ?? ''));
+        $password = (string)($_POST['password'] ?? '');
 
         {
-            $stmt = $pdo->prepare('SELECT id, username, password_hash, is_root FROM karta_ewidencyjna_users WHERE username = :username LIMIT 1');
+            $stmt = $pdo->prepare('SELECT * FROM karta_ewidencyjna_users WHERE username = :username LIMIT 1');
             $stmt->execute(['username' => $username]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user && password_verify($password, $user['password_hash']) && (!empty($user['is_root']) || ($user['username'] ?? '') === 'root')) {
+                session_regenerate_id(true);
+                appEnsureCsrfToken();
                 $_SESSION['admin_authenticated'] = true;
-                $_SESSION['username'] = (string)$user['username'];
+                appApplyUserSession($user);
                 header('Location: admin.php');
                 exit;
             }
@@ -116,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!empty($_SESSION['admin_authenticated']) && $action === 'change_password') {
         $userId = (int) ($_POST['user_id'] ?? 0);
-        $newPassword = trim($_POST['new_password'] ?? '');
+        $newPassword = (string)($_POST['new_password'] ?? '');
 
         if ($userId <= 0 || $newPassword === '') {
             $message = 'Podaj poprawne dane do zmiany hasła.';
@@ -147,11 +155,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!empty($_SESSION['admin_authenticated']) && $action === 'create_user') {
         $newUsername = trim((string)($_POST['new_username'] ?? ''));
-        $newPassword = trim((string)($_POST['new_user_password'] ?? ''));
+        $newPassword = (string)($_POST['new_user_password'] ?? '');
         $newEmail = trim((string)($_POST['new_user_email'] ?? ''));
 
         if ($newUsername === '' || $newPassword === '') {
             $message = 'Podaj login i hasło nowego użytkownika.';
+        } elseif (strlen($newPassword) < 8) {
+            $message = 'Hasło musi mieć co najmniej 8 znaków.';
         } elseif ($newEmail !== '' && !filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
             $message = 'Podaj poprawny adres e-mail.';
         } else {
@@ -421,6 +431,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
     <?php if (empty($_SESSION['admin_authenticated'])): ?>
         <h2>Logowanie do panelu administratora</h2>
         <form method="post" class="add-form" style="max-width:400px;">
+            <?= appCsrfField() ?>
             <input type="hidden" name="action" value="admin_login">
             <label>Username:</label>
             <input type="text" name="username" required>
@@ -432,6 +443,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
         <section class="admin-user-create-panel">
             <h2>Dane organizacji</h2>
             <form method="post" class="add-form" style="max-width:700px; margin-bottom:24px;">
+            <?= appCsrfField() ?>
                 <input type="hidden" name="action" value="update_organization_profile">
                 <label for="organization_name">Nazwa organizacji</label>
                 <input type="text" id="organization_name" name="organization_name" value="<?= h($organizationProfile['name']) ?>" required>
@@ -450,6 +462,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
 
             <h2>Logo bazy</h2>
             <form method="post" enctype="multipart/form-data" class="add-form" style="max-width:700px; margin-bottom:24px;">
+            <?= appCsrfField() ?>
                 <input type="hidden" name="action" value="upload_logo">
                 <label for="logo_file">Prześlij nowe logo (PNG)</label>
                 <input type="file" id="logo_file" name="logo_file" accept=".png,image/png" required>
@@ -458,6 +471,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
 
             <h2>Dodaj nowego użytkownika</h2>
             <form method="post" class="add-form admin-user-create-form">
+            <?= appCsrfField() ?>
                 <input type="hidden" name="action" value="create_user">
                 <label>Username:</label>
                 <input type="text" name="new_username" required>
@@ -496,6 +510,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
                         <td><?= h($user['username']) ?></td>
                         <td>
                             <form method="post" style="display:flex; gap:8px; align-items:center; margin:0;">
+            <?= appCsrfField() ?>
                                 <input type="hidden" name="action" value="update_user_profile">
                                 <input type="hidden" name="user_id" value="<?= h($user['id']) ?>">
                                 <input type="email" name="email" value="<?= h($user['email'] ?? '') ?>" placeholder="E-mail">
@@ -504,6 +519,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
                         </td>
                         <td>
                             <form method="post" style="display:flex; flex-direction:column; gap:6px; margin:0;">
+            <?= appCsrfField() ?>
                                 <input type="hidden" name="action" value="update_permissions">
                                 <input type="hidden" name="user_id" value="<?= h($user['id']) ?>">
                                 <label><input type="checkbox" name="can_full_database_view" value="1" <?= !empty($user['can_full_database_view']) ? 'checked' : '' ?>> pełny podgląd zawartości bazy</label>
@@ -518,6 +534,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
                         </td>
                         <td>
                             <form method="post" style="display:flex; gap:8px; align-items:center; margin:0;">
+            <?= appCsrfField() ?>
                                 <input type="hidden" name="action" value="change_password">
                                 <input type="hidden" name="user_id" value="<?= h($user['id']) ?>">
                                 <input type="password" name="new_password" placeholder="Nowe hasło" required>
@@ -531,6 +548,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
 
         <h2>Eksport bazy danych</h2>
         <form method="post">
+            <?= appCsrfField() ?>
             <input type="hidden" name="action" value="export_db">
             <button type="submit" id="toggleButton">Backup SQL + pobierz plik</button>
         </form>
@@ -568,6 +586,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
         </div>
 
         <form method="post" class="add-form" style="max-width:700px; margin-bottom:24px;">
+            <?= appCsrfField() ?>
             <input type="hidden" name="action" value="run_backup_job">
             <label for="backup_kind">Uruchom backup cykliczny</label>
             <select id="backup_kind" name="backup_kind" required>
@@ -580,6 +599,7 @@ if (!empty($_SESSION['admin_authenticated'])) {
 
         <h2>Testy odtwarzania (protokoły)</h2>
         <form method="post" class="add-form" style="max-width:900px; margin-bottom:24px;">
+            <?= appCsrfField() ?>
             <input type="hidden" name="action" value="record_restore_test">
             <label for="test_date">Data testu</label>
             <input type="date" id="test_date" name="test_date" value="<?= h(date('Y-m-d')) ?>" required>

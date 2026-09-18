@@ -11,6 +11,7 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 include 'db.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
@@ -28,6 +29,8 @@ if (!isset($collections[$selectedCollection])) {
     $selectedCollection = 'ksiazki-artystyczne';
 }
 $mainTable = $collections[$selectedCollection];
+$canFullDatabaseView = userCan('full_view');
+$selectedLedger = appSelectedLedger();
 
 $listColumns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);
 if (!in_array('collection', $listColumns, true)) {
@@ -38,6 +41,9 @@ if (!in_array('collection', $listColumns, true)) {
 $columns = [];
 $query = $pdo->query("SHOW COLUMNS FROM {$mainTable}");
 while ($row = $query->fetch(PDO::FETCH_ASSOC)) { $columns[] = $row['Field']; }
+if (!$canFullDatabaseView) {
+    $columns = array_values(array_intersect($columns, ['nazwa_tytul', 'autor_wytworca']));
+}
 
 // Pobierz listy
 $listsStmt = $pdo->prepare("SELECT id, list_name FROM lists WHERE collection = ? ORDER BY list_name");
@@ -176,6 +182,9 @@ if (isset($_GET['state'])) {
         $state = $_SESSION['search_states'][$search_state_id];
         $query_string = (string)($state['query_string'] ?? '');
         $search_results = is_array($state['search_results'] ?? null) ? $state['search_results'] : [];
+        if (!$canFullDatabaseView) {
+            $search_results = array_map('appFilterPreviewRow', $search_results);
+        }
         $state_columns = is_array($state['selected_columns'] ?? null) ? $state['selected_columns'] : [];
         if (!empty($state_columns)) {
             $selectedColumns = array_values(array_intersect($columns, $state_columns));
@@ -233,6 +242,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
             continue;
         }
         $seen[$dedupeKey] = true;
+        if (!$canFullDatabaseView) {
+            $row = appFilterPreviewRow($row);
+            $row['__collection_key'] = $rowCollection;
+        }
         $search_results[] = $row;
     }
 
@@ -245,6 +258,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
             continue;
         }
         $seen[$dedupeKey] = true;
+        if (!$canFullDatabaseView) {
+            $row = appFilterPreviewRow($row);
+            $row['__collection_key'] = $selectedCollection;
+        }
         $search_results[] = $row;
     }
 
@@ -264,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
         $_SESSION['search_states'] = array_slice($_SESSION['search_states'], -20, null, true);
     }
 
-    header('Location: search.php?collection=' . urlencode($selectedCollection) . '&state=' . urlencode($search_state_id));
+    header('Location: search.php?collection=' . urlencode($selectedCollection) . '&ledger=' . urlencode($selectedLedger) . '&state=' . urlencode($search_state_id));
     exit;
 }
 ?>
@@ -615,7 +632,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                                     </td>
                                 <?php endforeach; ?>
                                 <?php
-                                        $kartaHref = 'karta.php?id=' . urlencode((string)$entryId) . '&collection=' . urlencode($rowCollection);
+                                        $kartaHref = 'karta.php?id=' . urlencode((string)$entryId) . '&collection=' . urlencode($rowCollection) . '&ledger=' . urlencode($selectedLedger);
                                         if ($search_state_id !== '') {
                                             $kartaHref .= '&search_return=' . urlencode('search.php?state=' . $search_state_id);
                                         }

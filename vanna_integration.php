@@ -136,6 +136,10 @@ if (!function_exists('vannaValidateReadonlySql')) {
             return 'Wygenerowane zapytanie zawiera operacje modyfikujace lub administracyjne.';
         }
 
+        if (preg_match('/\b(karta_ewidencyjna_users|password_reset_tokens|mobile_login_tokens|system_backup_runs|record_share_links)\b/i', $normalizedSql) === 1) {
+            return 'Zapytanie odwoluje sie do tabel chronionych.';
+        }
+
         return null;
     }
 }

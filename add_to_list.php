@@ -24,7 +24,8 @@ try {
         echo json_encode(['success' => false, 'message' => 'Brak uprawnień.']);
         exit;
     }
-    if (empty($_SESSION['can_edit_lists']) && empty($_SESSION['is_root'])) {
+    require_once __DIR__ . '/auth.php';
+    if (!userCan('edit_lists')) {
         echo json_encode(['success' => false, 'message' => 'Brak uprawnień do edycji list.']);
         exit;
     }

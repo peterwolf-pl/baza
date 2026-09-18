@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/app_settings.php';
+require_once __DIR__ . '/auth.php';
 
 if (!function_exists('renderAppHeader')) {
     function renderAppHeader(array $config = []): void
@@ -20,10 +21,10 @@ if (!function_exists('renderAppHeader')) {
         $logoutHref = (string)($config['logoutHref'] ?? 'logout.php');
         $primaryActions = is_array($config['primaryActions'] ?? null) ? $config['primaryActions'] : [];
         $showBulkBar = (bool)($config['showBulkBar'] ?? false);
-        $canEditLists = !empty($_SESSION['can_edit_lists']) || !empty($_SESSION['is_root']);
-        $canAccessAdmin = !empty($_SESSION['is_root']) || (($username ?? '') === 'root');
-        $canImportInventory = !empty($_SESSION['can_inventory_entries']) || !empty($_SESSION['is_root']);
-        $canUseVanna = !empty($_SESSION['can_full_database_view']) || !empty($_SESSION['is_root']);
+        $canEditLists = userCan('edit_lists');
+        $canAccessAdmin = userIsRoot();
+        $canImportInventory = userCan('inventory_entries');
+        $canUseVanna = userCan('full_view');
         $organizacyjneBaseHref = 'organizacyjne.php?collection=' . rawurlencode($selectedCollection);
         $organizacyjneActionsBaseHref = 'organizacyjne_actions.php?collection=' . rawurlencode($selectedCollection);
         $availableLedgers = is_array($config['ledgers'] ?? null) ? $config['ledgers'] : [];

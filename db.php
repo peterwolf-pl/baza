@@ -337,16 +337,24 @@ $GLOBALS['app_selected_ledger_table_prefix'] = $selectedLedgerPrefix;
 
 try {
     if ($ledgerTableMap !== []) {
-        $rawPdoForProvision = new PDO(
-            "mysql:host={$servername};port={$port};dbname={$dbname};charset=utf8mb4",
-            $usernames,
-            $passwords,
-            [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            ]
-        );
-        appLedgerEnsureMappedTablesExist($rawPdoForProvision, $ledgerTableMap);
+        $safeLedger = preg_replace('/[^a-z0-9_-]+/i', '-', (string)$selectedLedger) ?: 'ledger';
+        $provisionCacheFile = __DIR__ . '/tmp/ledger_ready_' . $safeLedger;
+        if (!is_file($provisionCacheFile)) {
+            $rawPdoForProvision = new PDO(
+                "mysql:host={$servername};port={$port};dbname={$dbname};charset=utf8mb4",
+                $usernames,
+                $passwords,
+                [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                ]
+            );
+            appLedgerEnsureMappedTablesExist($rawPdoForProvision, $ledgerTableMap);
+            if (!is_dir(__DIR__ . '/tmp')) {
+                @mkdir(__DIR__ . '/tmp', 0775, true);
+            }
+            @file_put_contents($provisionCacheFile, date('c') . PHP_EOL);
+        }
     }
 
     $pdo = new AppLedgerPDO(

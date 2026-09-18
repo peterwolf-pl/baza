@@ -10,9 +10,11 @@ uploads/*
 !uploads/.gitkeep
 tmp/*
 !tmp/.gitkeep
+!tmp/.htaccess
 tmp/cache/*
 output/*
 !output/.gitkeep
+!output/.htaccess
 output/backups/*
 cgi-bin/
 2/

@@ -7,12 +7,13 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 include 'db.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
 function userCanCreateEntries(): bool
 {
-    return !empty($_SESSION['can_inventory_entries']);
+    return userCan('inventory_entries');
 }
 
 function importCollections(): array

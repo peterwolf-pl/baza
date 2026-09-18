@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . '/auth.php';
 include 'db.php';
 
 function ensurePasswordResetTables(PDO $pdo): void {
@@ -34,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($user) {
             $token = bin2hex(random_bytes(32));
-            $tokenHash = password_hash($token, PASSWORD_BCRYPT);
+            $tokenHash = hash('sha256', $token);
             $expiresAt = date('Y-m-d H:i:s', strtotime('+1 hour'));
             $pdo->prepare('INSERT INTO password_reset_tokens (user_id, email, token_hash, expires_at) VALUES (:user_id, :email, :token_hash, :expires_at)')
                 ->execute([
@@ -44,11 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'expires_at' => $expiresAt,
                 ]);
 
-            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-            $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-            $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['PHP_SELF'] ?? '')), '/');
-            $resetLink = $scheme . '://' . $host . ($basePath ? $basePath : '') . '/reset_password.php?t=' . urlencode($token);
-
+            $resetLink = appPublicUrl('reset_password.php', ['t' => $token]);
             $subject = 'Reset hasła - baza.mkal.pl';
             $body = "Link do resetu hasła (ważny 1h):\n" . $resetLink;
             @mail((string)$user['email'], $subject, $body);

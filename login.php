@@ -21,9 +21,7 @@ $error = isset($_GET['error']);
         <a href="https://baza.mkal.pl">
             <img src="bazamka.png" width="400" alt="Logo bazy" class="logo">
         </a>
-        <div class="header-links">
-            <a href="admin.php" id="toggleButton">adm</a>
-        </div>
+        <div class="header-links"></div>
     </div>
 
     <?php if ($error): ?>

@@ -341,53 +341,12 @@ function museumEnsureUniqueInventoryNumberConstraint(PDO $pdo, string $tableName
         }
     }
 
+    $checked[$cacheKey] = true;
     if ($hasUnique) {
-        $checked[$cacheKey] = true;
         return;
     }
 
-    $pdo->exec(
-        "UPDATE {$tableSql}
-         SET `numer_ewidencyjny` = NULL
-         WHERE `numer_ewidencyjny` IS NOT NULL
-           AND TRIM(CAST(`numer_ewidencyjny` AS CHAR)) = ''"
-    );
-
-    $dupStmt = $pdo->query(
-        "SELECT `numer_ewidencyjny`, COUNT(*) AS cnt
-         FROM {$tableSql}
-         WHERE `numer_ewidencyjny` IS NOT NULL
-           AND TRIM(CAST(`numer_ewidencyjny` AS CHAR)) <> ''
-         GROUP BY `numer_ewidencyjny`
-         HAVING COUNT(*) > 1
-         ORDER BY cnt DESC, `numer_ewidencyjny` ASC
-         LIMIT 5"
-    );
-    $duplicates = $dupStmt->fetchAll(PDO::FETCH_ASSOC);
-    if (!empty($duplicates)) {
-        $sample = implode(', ', array_map(static function (array $row): string {
-            return (string)($row['numer_ewidencyjny'] ?? '?') . ' (x' . (int)($row['cnt'] ?? 0) . ')';
-        }, $duplicates));
-        throw new RuntimeException(
-            'Nie można włączyć unikalności numeru inwentarzowego: wykryto duplikaty w tabeli '
-            . $tableName . ' [' . $sample . '].'
-        );
-    }
-
-    try {
-        $pdo->exec("ALTER TABLE {$tableSql} ADD UNIQUE KEY `uniq_numer_ewidencyjny` (`numer_ewidencyjny`)");
-    } catch (PDOException $e) {
-        $recheckStmt = $pdo->query("SHOW INDEX FROM {$tableSql}");
-        while ($row = $recheckStmt->fetch(PDO::FETCH_ASSOC)) {
-            if (($row['Column_name'] ?? null) === 'numer_ewidencyjny' && (int)($row['Non_unique'] ?? 1) === 0) {
-                $checked[$cacheKey] = true;
-                return;
-            }
-        }
-        throw $e;
-    }
-
-    $checked[$cacheKey] = true;
+    // Unikalność włączamy migracją / panelem admina, nie ALTER-em na zwykłym requeście.
 }
 
 function museumEnsureBackupTables(PDO $pdo): void

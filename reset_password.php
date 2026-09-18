@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/auth.php';
 include 'db.php';
 
 $pdo->exec(
@@ -19,28 +20,35 @@ $pdo->exec(
 $token = trim((string)($_GET['t'] ?? $_POST['t'] ?? ''));
 $message = '';
 $ok = false;
+$showForm = false;
 
 if ($token === '') {
     $message = 'Brak tokenu resetu.';
 } else {
-    $rows = $pdo->query("SELECT id, user_id, token_hash, expires_at, used_at FROM password_reset_tokens WHERE used_at IS NULL AND expires_at >= NOW() ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
-    $matched = null;
-    foreach ($rows as $row) {
-        if (password_verify($token, (string)$row['token_hash'])) {
-            $matched = $row;
-            break;
-        }
-    }
+    $tokenHash = hash('sha256', $token);
+    $stmt = $pdo->prepare(
+        'SELECT id, user_id, token_hash, expires_at, used_at
+         FROM password_reset_tokens
+         WHERE token_hash = :token_hash
+           AND used_at IS NULL
+           AND expires_at >= NOW()
+         ORDER BY id DESC
+         LIMIT 1'
+    );
+    $stmt->execute(['token_hash' => $tokenHash]);
+    $matched = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$matched) {
         $message = 'Link resetu jest nieprawidłowy lub wygasł.';
     } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = (string)($_POST['new_password'] ?? '');
         $confirm = (string)($_POST['confirm_password'] ?? '');
-        if (strlen($password) < 6) {
-            $message = 'Hasło musi mieć co najmniej 6 znaków.';
+        if (strlen($password) < 8) {
+            $message = 'Hasło musi mieć co najmniej 8 znaków.';
+            $showForm = true;
         } elseif ($password !== $confirm) {
             $message = 'Hasła nie są takie same.';
+            $showForm = true;
         } else {
             $pdo->prepare('UPDATE karta_ewidencyjna_users SET password_hash = :hash WHERE id = :id')
                 ->execute(['hash' => password_hash($password, PASSWORD_BCRYPT), 'id' => (int)$matched['user_id']]);
@@ -49,6 +57,8 @@ if ($token === '') {
             $message = 'Hasło zostało zresetowane.';
             $ok = true;
         }
+    } else {
+        $showForm = true;
     }
 }
 ?>
@@ -62,13 +72,13 @@ if ($token === '') {
 <body>
     <h2>Reset hasła</h2>
     <?php if ($message !== ''): ?><p><?= htmlspecialchars($message) ?></p><?php endif; ?>
-    <?php if (!$ok && $token !== '' && str_contains($message, 'wygasł') === false && str_contains($message, 'Brak tokenu') === false): ?>
+    <?php if ($showForm && !$ok): ?>
         <form method="post" style="max-width:480px;">
             <input type="hidden" name="t" value="<?= htmlspecialchars($token) ?>">
             <label for="new_password">Nowe hasło</label>
-            <input type="password" id="new_password" name="new_password" required minlength="6">
+            <input type="password" id="new_password" name="new_password" required minlength="8">
             <label for="confirm_password">Powtórz hasło</label>
-            <input type="password" id="confirm_password" name="confirm_password" required minlength="6">
+            <input type="password" id="confirm_password" name="confirm_password" required minlength="8">
             <button type="submit" id="toggleButton">Zapisz hasło</button>
         </form>
     <?php endif; ?>

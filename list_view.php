@@ -6,6 +6,7 @@ ini_set('log_errors', '1');
 error_reporting(E_ALL);
 
 include 'db.php';
+require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
@@ -115,6 +116,9 @@ $bulkMoveSuccess = null;
 $bulkMoveError = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszczenie'])) {
+    if (!userCan('move_records')) {
+        $bulkMoveError = 'Brak uprawnień do dodawania przemieszczeń.';
+    } else {
     $dataPrzemieszczenia = trim($_POST['data_przemieszczenia'] ?? '');
     $dataZwrotu = trim($_POST['data_zwrotu'] ?? '');
     $miejscePrzemieszczenia = trim($_POST['miejsce_przemieszczenia'] ?? '');
@@ -181,6 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszcze
             }
         }
     }
+    }
 }
 
 // Pobierz nazwy kolumn z tabeli
@@ -237,7 +242,8 @@ if (!$list) {
     echo "Lista nie istnieje.";
     exit;
 }
-$canEditLists = !empty($_SESSION['can_edit_lists']) || !empty($_SESSION['is_root']);
+$canEditLists = userCan('edit_lists');
+$canMoveRecords = userCan('move_records');
 
 $entryIdsForList = array_values(array_unique(array_map(
     static fn(array $entry): int => (int)($entry['ID'] ?? $entry['id'] ?? 0),
@@ -1147,7 +1153,9 @@ if (!empty($entryIdsForList)) {
             </table>
 
             <div class="bulk-actions">
+                <?php if ($canMoveRecords): ?>
                 <button id="toggleBulkPrzemieszczenieButton" type="button" onclick="toggleBulkPrzemieszczenieForm()">Dodaj przemieszczenie całej listy</button>
+                <?php endif; ?>
                 <button id="toggleCommonPrzemieszczeniaButton" type="button" onclick="toggleCommonPrzemieszczenia()">Wspólne przemieszczenia listy</button>
             </div>
             <div id="scannerUnknownContainer" class="scanner-unknown-container" hidden>
