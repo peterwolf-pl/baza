@@ -795,6 +795,265 @@ function museumGenerateThumbnailForImage(array $item): array
     ];
 }
 
+function museumCollectionMainTables(): array
+{
+    return [
+        'ksiazki-artystyczne' => 'karta_ewidencyjna',
+        'kolekcja-maszyn' => 'karta_ewidencyjna_maszyny',
+        'kolekcja-matryc' => 'karta_ewidencyjna_matryce',
+        'biblioteka' => 'karta_ewidencyjna_bib',
+        'kolekcja-klisz' => 'karta_ewidencyjna_klisze',
+    ];
+}
+
+function museumSanitizeGfxRelativePath(?string $raw): ?string
+{
+    $normalized = museumNormalizeImageReference($raw);
+    if ($normalized === null || preg_match('#^https?://#i', $normalized) === 1) {
+        return null;
+    }
+
+    $relative = ltrim(str_replace('\\', '/', $normalized), '/');
+    if (str_starts_with($relative, 'gfx/')) {
+        $relative = substr($relative, 4);
+    }
+    if ($relative === '' || str_contains($relative, '..') || str_starts_with($relative, 'thumbs/')) {
+        return null;
+    }
+    if (!museumIsGfxImageFilename($relative)) {
+        return null;
+    }
+
+    return $relative;
+}
+
+function museumListMissingLocalOriginals(PDO $pdo): array
+{
+    $missing = [];
+    $seen = [];
+    $base = museumGfxBaseDir();
+
+    foreach (museumCollectionMainTables() as $collection => $table) {
+        try {
+            $stmt = $pdo->query(
+                'SELECT dokumentacja_wizualna FROM ' . museumQuoteIdentifier($table)
+                . " WHERE dokumentacja_wizualna IS NOT NULL AND TRIM(dokumentacja_wizualna) <> ''"
+            );
+        } catch (Throwable $e) {
+            continue;
+        }
+        if ($stmt === false) {
+            continue;
+        }
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $relative = museumSanitizeGfxRelativePath(isset($row['dokumentacja_wizualna']) ? (string)$row['dokumentacja_wizualna'] : null);
+            if ($relative === null || isset($seen[$relative])) {
+                continue;
+            }
+            $seen[$relative] = true;
+            $local = $base . '/' . $relative;
+            if (!is_file($local)) {
+                $missing[] = [
+                    'relative' => $relative,
+                    'collection' => $collection,
+                    'source' => $local,
+                    'thumb' => museumThumbsBaseDir() . '/' . $relative,
+                ];
+            }
+        }
+    }
+
+    return $missing;
+}
+
+function museumRemoteOriginalUrls(string $relative, string $collection): array
+{
+    $encoded = museumEncodeMediaPath($relative);
+    $cdnUrl = 'https://mkalodz.pl/bazagfx/' . $encoded;
+    $bazaUrl = 'https://baza.mkal.pl/gfx/' . $encoded;
+    if ($collection === 'ksiazki-artystyczne') {
+        return [$cdnUrl, $bazaUrl];
+    }
+    return [$bazaUrl, $cdnUrl];
+}
+
+function museumHttpGetBinary(string $url, int $timeoutSeconds = 20): ?string
+{
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return null;
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_TIMEOUT => $timeoutSeconds,
+            CURLOPT_USERAGENT => 'baza.mkal.pl thumbnail-sync',
+        ]);
+        $body = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if (!is_string($body) || $body === '' || $code !== 200) {
+            return null;
+        }
+        return $body;
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'timeout' => $timeoutSeconds,
+            'follow_location' => 1,
+            'header' => "User-Agent: baza.mkal.pl thumbnail-sync\r\n",
+        ],
+    ]);
+    $body = @file_get_contents($url, false, $context);
+    return is_string($body) && $body !== '' ? $body : null;
+}
+
+function museumCompressImageToFile(string $sourcePath, string $destPath, int $maxEdge = 1920, int $jpegQuality = 72): bool
+{
+    if (!extension_loaded('gd')) {
+        return false;
+    }
+
+    $imageInfo = @getimagesize($sourcePath);
+    if (!$imageInfo || empty($imageInfo[0]) || empty($imageInfo[1])) {
+        return false;
+    }
+
+    [$sourceWidth, $sourceHeight, $imageType] = $imageInfo;
+    if ($sourceWidth <= 0 || $sourceHeight <= 0) {
+        return false;
+    }
+
+    $createMap = [
+        IMAGETYPE_JPEG => 'imagecreatefromjpeg',
+        IMAGETYPE_PNG => 'imagecreatefrompng',
+        IMAGETYPE_GIF => 'imagecreatefromgif',
+        IMAGETYPE_WEBP => 'imagecreatefromwebp',
+    ];
+    if (!isset($createMap[$imageType]) || !function_exists($createMap[$imageType])) {
+        return false;
+    }
+
+    $sourceImage = @$createMap[$imageType]($sourcePath);
+    if ($sourceImage === false) {
+        return false;
+    }
+
+    $scale = 1.0;
+    $longest = max($sourceWidth, $sourceHeight);
+    if ($longest > $maxEdge) {
+        $scale = $maxEdge / $longest;
+    }
+    $targetWidth = max(1, (int)round($sourceWidth * $scale));
+    $targetHeight = max(1, (int)round($sourceHeight * $scale));
+
+    if ($targetWidth !== $sourceWidth || $targetHeight !== $sourceHeight) {
+        $output = imagecreatetruecolor($targetWidth, $targetHeight);
+        if ($output === false) {
+            imagedestroy($sourceImage);
+            return false;
+        }
+        if (in_array($imageType, [IMAGETYPE_PNG, IMAGETYPE_GIF], true)) {
+            imagealphablending($output, false);
+            imagesavealpha($output, true);
+            $transparent = imagecolorallocatealpha($output, 0, 0, 0, 127);
+            imagefilledrectangle($output, 0, 0, $targetWidth, $targetHeight, $transparent);
+        }
+        imagecopyresampled($output, $sourceImage, 0, 0, 0, 0, $targetWidth, $targetHeight, $sourceWidth, $sourceHeight);
+        imagedestroy($sourceImage);
+        $sourceImage = $output;
+    }
+
+    $destDir = dirname($destPath);
+    if (!is_dir($destDir) && !@mkdir($destDir, 0775, true) && !is_dir($destDir)) {
+        imagedestroy($sourceImage);
+        return false;
+    }
+
+    $result = false;
+    switch ($imageType) {
+        case IMAGETYPE_JPEG:
+            $result = imagejpeg($sourceImage, $destPath, $jpegQuality);
+            break;
+        case IMAGETYPE_PNG:
+            $result = imagepng($sourceImage, $destPath, 6);
+            break;
+        case IMAGETYPE_GIF:
+            $result = imagegif($sourceImage, $destPath);
+            break;
+        case IMAGETYPE_WEBP:
+            $result = imagewebp($sourceImage, $destPath, $jpegQuality);
+            break;
+    }
+
+    imagedestroy($sourceImage);
+    return $result;
+}
+
+function museumFetchAndStoreRemoteOriginal(string $relative, string $collection): array
+{
+    $relative = (string)museumSanitizeGfxRelativePath($relative);
+    if ($relative === '') {
+        return ['ok' => false, 'file' => $relative, 'message' => 'Nieprawidłowa ścieżka zdjęcia.'];
+    }
+
+    $local = museumGfxBaseDir() . '/' . $relative;
+    if (is_file($local)) {
+        return ['ok' => true, 'file' => $relative, 'message' => 'Już jest w gfx/.', 'skipped' => true];
+    }
+
+    $bytes = null;
+    $sourceUrl = '';
+    foreach (museumRemoteOriginalUrls($relative, $collection) as $url) {
+        $bytes = museumHttpGetBinary($url);
+        if ($bytes !== null) {
+            $sourceUrl = $url;
+            break;
+        }
+    }
+    if ($bytes === null) {
+        return ['ok' => false, 'file' => $relative, 'message' => 'Brak pliku na mkalodz.pl i na bazie.'];
+    }
+    if (strlen($bytes) > 25 * 1024 * 1024) {
+        return ['ok' => false, 'file' => $relative, 'message' => 'Pobrany plik jest większy niż 25 MB.'];
+    }
+
+    $tmp = tempnam(sys_get_temp_dir(), 'gfxdl_');
+    if ($tmp === false || file_put_contents($tmp, $bytes) === false) {
+        return ['ok' => false, 'file' => $relative, 'message' => 'Nie udało się zapisać pliku tymczasowego.'];
+    }
+
+    $originalKb = (int)round(strlen($bytes) / 1024);
+    $compressed = museumCompressImageToFile($tmp, $local);
+    if (!$compressed) {
+        $copied = @copy($tmp, $local);
+        @unlink($tmp);
+        if (!$copied) {
+            return ['ok' => false, 'file' => $relative, 'message' => 'Nie udało się zapisać zdjęcia do gfx/.'];
+        }
+        museumCreateThumbnail($local, museumThumbsBaseDir() . '/' . $relative);
+        return [
+            'ok' => true,
+            'file' => $relative,
+            'message' => 'Pobrano bez kompresji (' . $originalKb . ' KB) z ' . $sourceUrl . '.',
+        ];
+    }
+
+    @unlink($tmp);
+    $newSize = @filesize($local);
+    $newKb = $newSize === false ? 0 : (int)round($newSize / 1024);
+    museumCreateThumbnail($local, museumThumbsBaseDir() . '/' . $relative);
+
+    return [
+        'ok' => true,
+        'file' => $relative,
+        'message' => 'Pobrano i skompresowano ' . $originalKb . ' KB → ' . $newKb . ' KB.',
+    ];
+}
+
 function museumDetectMimeType(string $filePath): ?string
 {
     if (function_exists('finfo_open')) {

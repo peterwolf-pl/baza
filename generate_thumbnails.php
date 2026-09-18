@@ -37,21 +37,55 @@ $errors = [];
 $batchResults = [];
 $generatedOk = 0;
 $generatedFail = 0;
+$fetchedOk = 0;
+$fetchedFail = 0;
 $autoContinue = false;
+$fetchMissing = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     appRequireCsrf();
+    $fetchMissing = isset($_POST['fetch_missing']);
     if (!userCanGenerateThumbnails()) {
         $errors[] = 'Brak uprawnień do generowania miniatur.';
     } elseif (!$gdAvailable) {
         $errors[] = 'Rozszerzenie PHP GD nie jest dostępne na serwerze.';
     } else {
-        @set_time_limit(90);
+        @set_time_limit(120);
         $batchSize = max(1, min(50, (int)($_POST['batch_size'] ?? 20)));
+
+        if ($fetchMissing) {
+            $remoteMissing = museumListMissingLocalOriginals($pdo);
+            $fetchSlice = array_slice($remoteMissing, 0, min($batchSize, 15));
+            foreach ($fetchSlice as $item) {
+                $result = museumFetchAndStoreRemoteOriginal(
+                    (string)($item['relative'] ?? ''),
+                    (string)($item['collection'] ?? $selectedCollection)
+                );
+                $batchResults[] = $result;
+                if (!empty($result['ok'])) {
+                    $fetchedOk++;
+                } else {
+                    $fetchedFail++;
+                    appLogException(
+                        'generate_thumbnails.php fetch ' . (string)($result['file'] ?? ''),
+                        new RuntimeException((string)($result['message'] ?? 'błąd'))
+                    );
+                }
+            }
+            if ($fetchSlice === []) {
+                $messages[] = 'Nie znaleziono w bazie zdjęć, których brakuje w gfx/.';
+            } else {
+                $messages[] = 'Pobieranie: OK ' . $fetchedOk . ', błędów ' . $fetchedFail
+                    . ' (z ' . count($fetchSlice) . ').';
+            }
+        }
+
         $missingBefore = museumListMissingThumbnails();
         $slice = array_slice($missingBefore, 0, $batchSize);
         if ($slice === []) {
-            $messages[] = 'Nie znaleziono brakujących miniatur.';
+            if (!$fetchMissing) {
+                $messages[] = 'Nie znaleziono brakujących miniatur.';
+            }
         } else {
             foreach ($slice as $item) {
                 $result = museumGenerateThumbnailForImage($item);
@@ -66,30 +100,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                 }
             }
-            $messages[] = 'Ta partia: wygenerowano ' . $generatedOk
+            $messages[] = 'Miniatury: wygenerowano ' . $generatedOk
                 . ', błędów ' . $generatedFail
                 . ' (z ' . count($slice) . ' plików).';
         }
-        $autoContinue = $generatedFail === 0
-            && count(museumListMissingThumbnails()) > 0
+
+        $stillMissingThumbs = count(museumListMissingThumbnails()) > 0;
+        $stillMissingRemote = $fetchMissing && count(museumListMissingLocalOriginals($pdo)) > 0;
+        $autoContinue = ($generatedFail + $fetchedFail) === 0
+            && ($stillMissingThumbs || $stillMissingRemote)
             && isset($_POST['auto_continue']);
     }
 }
 
 $sourceImages = [];
 $missing = [];
+$missingRemote = [];
 try {
     $sourceImages = museumListGfxSourceImages();
     $missing = museumListMissingThumbnails();
+    $missingRemote = museumListMissingLocalOriginals($pdo);
 } catch (Throwable $e) {
     appLogException('generate_thumbnails.php scan', $e);
-    $errors[] = 'Nie udało się przeskanować katalogu gfx/.';
+    $errors[] = 'Nie udało się przeskanować katalogu gfx/ albo bazy.';
 }
 
 $sourceCount = count($sourceImages);
 $missingCount = count($missing);
+$missingRemoteCount = count($missingRemote);
 $existingCount = max(0, $sourceCount - $missingCount);
 $previewMissing = array_slice($missing, 0, 25);
+$previewRemote = array_slice($missingRemote, 0, 25);
+$canRun = $gdAvailable && ($missingCount > 0 || $missingRemoteCount > 0);
 $esc = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 ?>
 <!DOCTYPE html>
@@ -149,6 +191,7 @@ renderAppHeader([
         <p>
             Miniatury są zapisywane w <code>gfx/thumbs/</code> obok oryginalnych zdjęć z <code>gfx/</code>.
             Lista i wyszukiwarka najpierw ładują miniaturę, a gdy jej nie ma — pełne zdjęcie.
+            Opcjonalnie można ściągnąć brakujące oryginały z <code>mkalodz.pl/bazagfx</code> albo z bazy i lekko je skompresować (max. bok 1920 px, JPEG ~72).
         </p>
         <?php if (!$gdAvailable): ?>
             <p class="thumbs-error">Brak rozszerzenia GD — generowanie miniatur jest niemożliwe.</p>
@@ -173,6 +216,10 @@ renderAppHeader([
                 <span class="thumbs-muted">Brakuje miniatury</span>
                 <strong><?php echo (int)$missingCount; ?></strong>
             </div>
+            <div class="thumbs-stat">
+                <span class="thumbs-muted">Brak w gfx/ (są w bazie)</span>
+                <strong><?php echo (int)$missingRemoteCount; ?></strong>
+            </div>
         </div>
     </div>
 
@@ -185,7 +232,7 @@ renderAppHeader([
             <h2>Uruchom generowanie</h2>
             <p class="thumbs-muted">
                 Partie po kilkanaście plików, żeby nie przekroczyć limitu czasu PHP.
-                Zaznacz automatyczną kontynuację, jeśli brakuje wielu miniatur.
+                Zaznacz automatyczną kontynuację, jeśli brakuje wielu plików.
             </p>
             <form method="post" action="<?php echo $esc($pageHref); ?>" id="thumbsGenerateForm">
                 <?= appCsrfField() ?>
@@ -194,16 +241,20 @@ renderAppHeader([
                     <label for="batch_size">Partia</label>
                     <input type="number" id="batch_size" name="batch_size" min="1" max="50" value="<?php echo (int)$batchSize; ?>">
                     <label>
+                        <input type="checkbox" name="fetch_missing" value="1" <?php echo $fetchMissing ? 'checked' : ''; ?>>
+                        Pobierz brakujące z mkalodz.pl / bazy i skompresuj do gfx/
+                    </label>
+                    <label>
                         <input type="checkbox" name="auto_continue" value="1" <?php echo $autoContinue ? 'checked' : ''; ?>>
                         Kontynuuj automatycznie
                     </label>
-                    <button type="submit" id="toggleButton" <?php echo ($gdAvailable && $missingCount > 0) ? '' : 'disabled'; ?>>
+                    <button type="submit" id="toggleButton" <?php echo $canRun ? '' : 'disabled'; ?>>
                         Generuj brakujące miniatury
                     </button>
                 </div>
             </form>
-            <?php if ($missingCount === 0 && $sourceCount > 0): ?>
-                <p class="thumbs-ok">Wszystkie znalezione zdjęcia mają miniatury.</p>
+            <?php if ($missingCount === 0 && $missingRemoteCount === 0 && $sourceCount > 0): ?>
+                <p class="thumbs-ok">Lokalne zdjęcia mają miniatury, a w gfx/ nie brakuje plików z bazy.</p>
             <?php endif; ?>
         </div>
 
@@ -221,9 +272,23 @@ renderAppHeader([
             </div>
         <?php endif; ?>
 
+        <?php if ($previewRemote !== []): ?>
+            <div class="thumbs-card">
+                <h2>Brak w lokalnym gfx/ (<?php echo (int)$missingRemoteCount; ?>)</h2>
+                <ul class="thumbs-list">
+                    <?php foreach ($previewRemote as $item): ?>
+                        <li><?php echo $esc($item['relative'] ?? ''); ?></li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php if ($missingRemoteCount > count($previewRemote)): ?>
+                    <p class="thumbs-muted">…i kolejne <?php echo (int)($missingRemoteCount - count($previewRemote)); ?> plików.</p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
         <?php if ($previewMissing !== []): ?>
             <div class="thumbs-card">
-                <h2>Przykłady brakujących (<?php echo (int)$missingCount; ?>)</h2>
+                <h2>Przykłady brakujących miniatur (<?php echo (int)$missingCount; ?>)</h2>
                 <ul class="thumbs-list">
                     <?php foreach ($previewMissing as $item): ?>
                         <li><?php echo $esc($item['relative'] ?? ''); ?></li>
