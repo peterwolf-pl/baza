@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 require_once __DIR__ . '/museum_system.php';
 
@@ -9,6 +9,7 @@ if (!isset($_SESSION['user_id'])) {
     echo json_encode(['success' => false, 'message' => 'Brak uprawnien.']);
     exit;
 }
+appRequireCsrf();
 
 $collections = [
     'ksiazki-artystyczne' => 'karta_ewidencyjna',
@@ -69,5 +70,6 @@ try {
         'inventory_number' => (string)($entry['numer_ewidencyjny'] ?? $inventoryNumber),
     ]);
 } catch (Throwable $e) {
-    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    appLogException('find_entry_by_inventory.php', $e);
+    echo json_encode(['success' => false, 'message' => 'Nie udało się wyszukać pozycji.']);
 }

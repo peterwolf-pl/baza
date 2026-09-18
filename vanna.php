@@ -1,9 +1,5 @@
 <?php
-session_start();
-ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
-ini_set('log_errors', '1');
-error_reporting(E_ALL);
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -140,6 +136,7 @@ if ($canUseVanna) {
 }
 
 if ($canUseVanna && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    appRequireCsrf();
     $hasAttempt = true;
 
     $action = (string)($_POST['vanna_action'] ?? 'generate');
@@ -473,6 +470,7 @@ renderAppHeader([
 
     <div class="vanna-box">
         <form method="post" action="<?php echo $esc($pageHref); ?>" class="vanna-form">
+            <?= appCsrfField() ?>
             <label for="vanna-question"><strong>Pytanie naturalne</strong></label>
             <textarea id="vanna-question" name="question" placeholder="Np. Pokaz 20 rekordow z kolekcji, w ktorych autor zawiera slowo Kantor."><?php echo $esc($question); ?></textarea>
             <div style="margin-top:12px;">
@@ -489,6 +487,7 @@ renderAppHeader([
             <div class="vanna-action-row">
                 <?php if ($canSaveCurrentQuery): ?>
                     <form method="post" action="<?php echo $esc($pageHref); ?>" class="vanna-inline-form">
+                        <?= appCsrfField() ?>
                         <input type="hidden" name="vanna_action" value="save">
                         <input type="hidden" name="question" value="<?php echo $esc($question); ?>">
                         <input type="hidden" name="generated_sql" value="<?php echo $esc($generatedSql); ?>">
@@ -583,6 +582,7 @@ renderAppHeader([
                             </p>
                             <div class="vanna-action-row">
                                 <form method="post" action="<?php echo $esc($pageHref); ?>" class="vanna-inline-form">
+                                    <?= appCsrfField() ?>
                                     <input type="hidden" name="vanna_action" value="run_saved">
                                     <input type="hidden" name="saved_query_id" value="<?php echo $savedId; ?>">
                                     <button type="submit">Uruchom</button>

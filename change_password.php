@@ -1,9 +1,5 @@
 <?php
-session_start();
-ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
-ini_set('log_errors', '1');
-error_reporting(E_ALL);
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
@@ -11,7 +7,6 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 include 'db.php';
-require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/header.php';
 
 $collections = [

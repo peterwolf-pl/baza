@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 
 if (empty($_SESSION['is_root'])) {
@@ -7,16 +7,11 @@ if (empty($_SESSION['is_root'])) {
     exit;
 }
 
-if (empty($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
-
 $message = '';
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $token = $_POST['csrf_token'] ?? '';
-    if (!is_string($token) || $token === '' || !hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
+    if (!appVerifyCsrf()) {
         $error = 'Nieprawidłowy token CSRF.';
     } else {
         $username = trim((string)($_POST['username'] ?? ''));

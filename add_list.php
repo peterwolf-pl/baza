@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 
 header('Content-Type: application/json');
@@ -8,11 +8,11 @@ if (!isset($_SESSION['user_id'])) {
     echo json_encode(['success' => false, 'message' => 'Brak uprawnień.']);
     exit;
 }
-require_once __DIR__ . '/auth.php';
 if (!userCan('edit_lists')) {
     echo json_encode(['success' => false, 'message' => 'Brak uprawnień do edycji list.']);
     exit;
 }
+appRequireCsrf();
 
 function ensureListsCollectionColumn(PDO $pdo): void {
     $columns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);

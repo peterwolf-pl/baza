@@ -1,14 +1,11 @@
 <?php
-// Rozpocznij sesję
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
 
-// Połączenie z bazą danych
 include 'db.php';
-require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 
 function userCanCreateEntries(): bool {
@@ -67,6 +64,7 @@ $valid_columns = [
 
 // Obsługa formularza dodawania nowej karty
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
     if (!userCanCreateEntries()) {
         http_response_code(403);
         die('Brak uprawnień do tworzenia wpisów do księgi inwentarzowej.');
@@ -137,16 +135,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo " Proponowany kolejny numer: " . $suggestedNumber . ".";
             }
         } elseif (($e->getCode() ?? '') === '23000') {
+            appLogException('neww.php constraint', $e);
             header('Content-Type: text/plain; charset=UTF-8');
-            echo "Błąd dodawania (naruszenie ograniczenia danych, nie dotyczy numer_ewidencyjny): " . $e->getMessage();
+            echo "Błąd dodawania: naruszenie ograniczenia danych.";
         } else {
+            appLogException('neww.php', $e);
             header('Content-Type: text/plain; charset=UTF-8');
-            echo "Błąd dodawania: " . $e->getMessage();
+            echo "Błąd dodawania wpisu.";
         }
         die();
     } catch (RuntimeException $e) {
+        appLogException('neww.php runtime', $e);
         header('Content-Type: text/plain; charset=UTF-8');
-        echo "Błąd dodawania: " . $e->getMessage();
+        echo "Błąd dodawania wpisu.";
         die();
     }
 }
@@ -173,6 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <p style="color:#b10000;">Nie masz uprawnień do tworzenia nowych wpisów.</p>
     <?php else: ?>
     <form method="post" class="add-form">
+        <?= appCsrfField() ?>
         <p><strong>Numer inwentarzowy</strong> jest nadawany automatycznie przy zapisie.</p>
         
         <?php foreach ($valid_columns as $column): ?>

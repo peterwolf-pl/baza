@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -7,7 +7,6 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 include 'db.php';
-require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
@@ -773,6 +772,7 @@ try {
 
 $formValues = eanLabelsDefaultFormValues($suggestedStart);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
     foreach (array_keys($formValues) as $key) {
         if (!array_key_exists($key, $_POST)) {
             continue;
@@ -810,7 +810,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
             $filename = 'ean-etykiety-' . $settings['start_number'] . '-' . $settings['end_number'] . '.pdf';
             eanLabelsSendPdf($pdfBinary, $filename);
         } catch (Throwable $e) {
-            $errors[] = $e->getMessage();
+            appLogException('ean_labels.php', $e);
+            $errors[] = ($e instanceof RuntimeException)
+                ? $e->getMessage()
+                : 'Nie udało się wygenerować PDF.';
         }
     }
 }
@@ -1128,6 +1131,7 @@ renderAppHeader([
     <?php else: ?>
         <section class="ean-card">
             <form method="post" action="ean_labels.php?<?php echo $esc($baseQuery); ?>">
+                <?= appCsrfField() ?>
                 <input type="hidden" name="action" value="generate_pdf">
                 <input type="hidden" name="collection" value="<?php echo $esc($selectedCollection); ?>">
 

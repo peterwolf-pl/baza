@@ -1,6 +1,5 @@
 <?php
-session_start();
-require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 require_once __DIR__ . '/app_settings.php';
 require_once __DIR__ . '/museum_system.php';
@@ -254,7 +253,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo $dump;
             exit;
         } catch (Throwable $e) {
-            $message = 'Nie udało się wykonać backupu SQL: ' . $e->getMessage();
+            appLogException('admin.php export_db', $e);
+            $message = 'Nie udało się wykonać backupu SQL.';
         }
     }
 
@@ -275,7 +275,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = 'Wykonano backup ' . $backupKind . ': ' . (string)$backup['file_name']
                     . ' (retencja usunęła: ' . (int)($backup['retention_deleted_count'] ?? 0) . ').';
             } catch (Throwable $e) {
-                $message = 'Nie udało się wykonać backupu ' . $backupKind . ': ' . $e->getMessage();
+                appLogException('admin.php run_backup_job', $e);
+                $message = 'Nie udało się wykonać backupu ' . $backupKind . '.';
             }
         }
     }
@@ -333,7 +334,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $organizationProfile = appSettingsGetOrganizationProfile($appConfig);
                 $message = 'Dane organizacji zostały zapisane.';
             } catch (Throwable $e) {
-                $message = 'Nie udało się zapisać danych organizacji: ' . $e->getMessage();
+                appLogException('admin.php organization', $e);
+                $message = 'Nie udało się zapisać danych organizacji.';
             }
         }
     }

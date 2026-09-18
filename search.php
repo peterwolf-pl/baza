@@ -1,9 +1,5 @@
 <?php
-session_start();
-ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
-ini_set('log_errors', '1');
-error_reporting(E_ALL);
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -11,7 +7,6 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 include 'db.php';
-require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
@@ -168,6 +163,10 @@ if (isset($_GET['state'])) {
 }
 
 // Szukanie
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((string)$_POST['query']) !== '') {
     $query_string = trim($_POST['query'] ?? '');
     $has_search = true;
@@ -519,6 +518,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
 
     <!-- Wybór kolumn -->
     <form id="columnSelectorContainer" class="column-selector" method="post" action="" onsubmit="suppressUnloadWarning = true;">
+        <?= appCsrfField() ?>
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
         <input type="hidden" name="show_thumbnail_column" value="0">
         <label>
@@ -540,6 +540,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
 
     <h2>Wyszukiwanie</h2>
     <form method="post" onsubmit="suppressUnloadWarning = true;">
+        <?= appCsrfField() ?>
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
         <input type="hidden" name="show_thumbnail_column" value="<?php echo $showThumbnailColumn ? '1' : '0'; ?>">
         <input type="hidden" name="thumbnail_size" value="<?php echo (int)$thumbnailSize; ?>" id="thumbnailSizeHidden">

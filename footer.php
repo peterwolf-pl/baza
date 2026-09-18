@@ -1,5 +1,9 @@
 <?php
 require_once __DIR__ . '/app_settings.php';
+if (!function_exists('appEnsureCsrfToken')) {
+    require_once __DIR__ . '/auth.php';
+}
+$footerCsrfToken = function_exists('appEnsureCsrfToken') ? appEnsureCsrfToken() : '';
 
 $footerShowThemeToggle = isset($footerShowThemeToggle) ? (bool)$footerShowThemeToggle : true;
 $footerShowLoadCacheButton = isset($footerShowLoadCacheButton) ? (bool)$footerShowLoadCacheButton : false;
@@ -199,4 +203,26 @@ function museumNextImageFallback(img) {
         img.onerror = null;
     }
 }
+</script>
+<script>
+(function () {
+    window.APP_CSRF_TOKEN = <?php echo json_encode($footerCsrfToken, JSON_UNESCAPED_SLASHES); ?> || window.APP_CSRF_TOKEN || '';
+    if (window.__appCsrfFetchPatched || typeof window.fetch !== 'function') {
+        return;
+    }
+    window.__appCsrfFetchPatched = true;
+    var originalFetch = window.fetch;
+    window.fetch = function (input, init) {
+        init = init || {};
+        var method = String(init.method || 'GET').toUpperCase();
+        if (method !== 'GET' && method !== 'HEAD' && window.APP_CSRF_TOKEN) {
+            var headers = new Headers(init.headers || {});
+            if (!headers.has('X-CSRF-Token')) {
+                headers.set('X-CSRF-Token', window.APP_CSRF_TOKEN);
+            }
+            init = Object.assign({}, init, { headers: headers });
+        }
+        return originalFetch.call(this, input, init);
+    };
+})();
 </script>

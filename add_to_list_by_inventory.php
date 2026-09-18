@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 require_once __DIR__ . '/museum_system.php';
 
@@ -9,7 +9,7 @@ if (!isset($_SESSION['user_id'])) {
     echo json_encode(['success' => false, 'message' => 'Brak uprawnien.']);
     exit;
 }
-require_once __DIR__ . '/auth.php';
+appRequireCsrf();
 if (!userCan('edit_lists')) {
     echo json_encode(['success' => false, 'message' => 'Brak uprawnien do edycji list.']);
     exit;
@@ -103,5 +103,6 @@ try {
         'inventory_number' => (string)($entry['numer_ewidencyjny'] ?? $inventoryNumber)
     ]);
 } catch (Throwable $e) {
-    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    appLogException('add_to_list_by_inventory.php', $e);
+    echo json_encode(['success' => false, 'message' => 'Nie udało się dodać wpisu do listy.']);
 }

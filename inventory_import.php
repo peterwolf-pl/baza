@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -7,7 +7,6 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 include 'db.php';
-require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
@@ -1148,6 +1147,7 @@ $loadTokenFromRequest = static function (): ?string {
 };
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
     if (!userCanCreateEntries()) {
         http_response_code(403);
         $errors[] = 'Brak uprawnień do tworzenia wpisów do księgi inwentarzowej.';
@@ -1233,7 +1233,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } catch (Throwable $e) {
-            $errors[] = $e->getMessage();
+            appLogException('inventory_import.php', $e);
+            $errors[] = ($e instanceof RuntimeException)
+                ? $e->getMessage()
+                : 'Nie udało się przetworzyć importu.';
             if ($dataset === null) {
                 $token = $loadTokenFromRequest();
                 if ($token !== null) {
@@ -1502,6 +1505,7 @@ renderAppHeader([
         <div class="import-card">
             <h2>Etap 1: Wczytaj plik</h2>
             <form method="post" enctype="multipart/form-data">
+                <?= appCsrfField() ?>
                 <input type="hidden" name="action" value="upload_dataset">
                 <div class="import-grid">
                     <label>
@@ -1551,6 +1555,7 @@ renderAppHeader([
                 </ul>
 
                 <form method="post" id="mappingForm">
+                    <?= appCsrfField() ?>
                     <input type="hidden" name="import_token" value="<?php echo $esc($activeToken ?? ''); ?>">
                     <input type="hidden" name="action" value="preview_mapping" id="mappingActionField">
 

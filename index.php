@@ -1,16 +1,10 @@
 <?php
-session_start();
-ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
-ini_set('log_errors', '1');
-error_reporting(E_ALL);
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
-
-require_once __DIR__ . '/auth.php';
 $username = $_SESSION['username'] ?? '';
 $canFullDatabaseView = userCan('full_view');
 $canEditLists = userCan('edit_lists');
@@ -175,9 +169,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
             'primary_key' => $primaryKeyColumn
         ]);
     } catch (Exception $e) {
+        appLogException('index.php fetch_rows', $e);
         http_response_code(500);
         header('Content-Type: application/json');
-        echo json_encode(['error' => $e->getMessage()]);
+        echo json_encode(['error' => 'Nie udało się pobrać wierszy.']);
     }
     exit;
 }
@@ -192,6 +187,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
         echo json_encode(['success' => false, 'message' => 'Method not allowed']);
         exit;
     }
+    appRequireCsrf();
 
     $rawInput = file_get_contents('php://input');
     $data = json_decode($rawInput, true);

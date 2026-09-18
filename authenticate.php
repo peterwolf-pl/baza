@@ -1,10 +1,5 @@
 <?php
-ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
-ini_set('log_errors', '1');
-error_reporting(E_ALL);
-session_start();
-require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 
 function ensureUserPermissionColumns(PDO $pdo): void
@@ -35,8 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$token = $_POST['csrf_token'] ?? '';
-if (!is_string($token) || $token === '' || !hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
+if (!appVerifyCsrf()) {
     header('Location: login.php?error=1');
     exit;
 }

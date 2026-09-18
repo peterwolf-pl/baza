@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 
 if (empty($_SESSION['admin_authenticated'])) {
     header('Location: admin.php');

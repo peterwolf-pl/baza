@@ -1,14 +1,11 @@
 <?php
-// Rozpocznij sesję
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
 
-// Połączenie z bazą danych
 include 'db.php';
-require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 require_once __DIR__ . '/header.php';
 
@@ -172,6 +169,10 @@ museumEnsureAttachmentTables($pdo);
 $shareLinkError = null;
 $shareLinkSuccess = null;
 $shareLinkExpiresAt = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_share_link'])) {
     if (!$canFullDatabaseView) {
@@ -378,9 +379,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_przemieszczenie']
 
             $moveAddSuccess = 'Dodano przemieszczenie nr ' . $numerPrzemieszczenia . '.';
         } catch (PDOException $e) {
-            $moveAddError = 'Błąd dodawania przemieszczenia: ' . $e->getMessage();
+            appLogException('karta.php move', $e);
+            $moveAddError = 'Błąd dodawania przemieszczenia.';
         } catch (RuntimeException $e) {
-            $moveAddError = 'Błąd dodawania przemieszczenia: ' . $e->getMessage();
+            appLogException('karta.php move runtime', $e);
+            $moveAddError = 'Błąd dodawania przemieszczenia.';
         }
     }
 }
@@ -485,7 +488,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_attachment']))
             if (is_array($storedFile) && !empty($storedFile['stored_abs_path']) && is_file($storedFile['stored_abs_path'])) {
                 @unlink((string)$storedFile['stored_abs_path']);
             }
-            $attachmentCreateError = 'Nie udało się dodać załącznika: ' . $e->getMessage();
+            appLogException('karta.php attachment', $e);
+            $attachmentCreateError = ($e instanceof RuntimeException)
+                ? $e->getMessage()
+                : 'Nie udało się dodać załącznika.';
         }
     }
 }
@@ -576,7 +582,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_attachment_versio
             if (is_array($storedFile) && !empty($storedFile['stored_abs_path']) && is_file($storedFile['stored_abs_path'])) {
                 @unlink((string)$storedFile['stored_abs_path']);
             }
-            $attachmentVersionError = 'Nie udało się dodać wersji załącznika: ' . $e->getMessage();
+            appLogException('karta.php attachment version', $e);
+            $attachmentVersionError = ($e instanceof RuntimeException)
+                ? $e->getMessage()
+                : 'Nie udało się dodać wersji załącznika.';
         }
     }
 }
@@ -670,7 +679,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_karta'])) {
         exit;
 
     } catch (PDOException $e) {
-        echo "Błąd aktualizacji: " . $e->getMessage();
+        appLogException('karta.php update', $e);
+        echo "Błąd aktualizacji karty.";
         die();
     }
 }
@@ -764,6 +774,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
     <div class="share-link-box">
         <h3>Udostępnij kartę</h3>
         <form method="post" class="form-inline">
+            <?= appCsrfField() ?>
             <input type="hidden" name="create_share_link" value="1">
             <button type="submit">Wygeneruj publiczny link (14 dni)</button>
         </form>
@@ -931,6 +942,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
                         <?php if ($canUpdateRecords): ?>
                             <h4 style="margin:12px 0 6px;">Dodaj nową wersję</h4>
                             <form method="post" enctype="multipart/form-data" class="add-form" style="max-width:700px;">
+                                <?= appCsrfField() ?>
                                 <input type="hidden" name="add_attachment_version" value="1">
                                 <input type="hidden" name="attachment_id" value="<?= $attachmentId ?>">
                                 <label for="attachment_version_file_<?= $attachmentId ?>">Plik nowej wersji</label>
@@ -948,6 +960,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php if ($canUpdateRecords): ?>
             <h3 style="margin-top:18px;">Dodaj nowy załącznik</h3>
             <form method="post" enctype="multipart/form-data" class="add-form">
+                <?= appCsrfField() ?>
                 <input type="hidden" name="create_attachment" value="1">
 
                 <label for="attachment_type">Typ dokumentu</label>
@@ -992,6 +1005,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
     <div id="editKartaContainer">
         <h2>Edytuj Kartę</h2>
         <form method="post">
+            <?= appCsrfField() ?>
             <input type="hidden" name="edit_karta" value="1">
             <table>
                 <?php foreach ($row as $key => $value): ?>
@@ -1076,6 +1090,7 @@ $przemieszczenia_rows = $przemieszczenia_stmt->fetchAll(PDO::FETCH_ASSOC);
    <?php if ($canMoveRecords): ?>
    <h3>Dodaj nowe przemieszczenie:</h3>
         <form method="post" class="add-form">
+            <?= appCsrfField() ?>
             <input type="hidden" name="add_przemieszczenie" value="1">
             <label for="data_przemieszczenia">Data Przemieszczenia</label>
             <input type="date" name="data_przemieszczenia" id="data_przemieszczenia" required>

@@ -1,19 +1,14 @@
 <?php
-session_start();
-ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
-ini_set('log_errors', '1');
-error_reporting(E_ALL);
-
-include 'db.php';
-require_once __DIR__ . '/auth.php';
-require_once __DIR__ . '/museum_system.php';
-require_once __DIR__ . '/header.php';
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
+
+include 'db.php';
+require_once __DIR__ . '/museum_system.php';
+require_once __DIR__ . '/header.php';
 
 
 $collections = [
@@ -83,6 +78,10 @@ function buildImagePaths(?string $rawImageValue, string $collection): array {
 $bulkMoveSuccess = null;
 $bulkMoveError = null;
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszczenie'])) {
     if (!userCan('move_records')) {
         $bulkMoveError = 'Brak uprawnień do dodawania przemieszczeń.';
@@ -144,12 +143,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszcze
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $bulkMoveError = 'Nie udało się dodać przemieszczeń: ' . $e->getMessage();
+                appLogException('list_view.php bulk move', $e);
+                $bulkMoveError = 'Nie udało się dodać przemieszczeń.';
             } catch (RuntimeException $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                $bulkMoveError = 'Nie udało się dodać przemieszczeń: ' . $e->getMessage();
+                appLogException('list_view.php bulk move runtime', $e);
+                $bulkMoveError = 'Nie udało się dodać przemieszczeń.';
             }
         }
     }
@@ -1050,6 +1051,7 @@ if (!empty($entryIdsForList)) {
     
    
     <form id="columnSelectorContainer" class="column-selector" method="post" action="">
+        <?= appCsrfField() ?>
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
         <input type="hidden" name="thumbnail_size" value="<?php echo (int)$thumbnailSize; ?>">
         <input type="hidden" name="show_thumbnail_column" value="0">
@@ -1142,6 +1144,7 @@ if (!empty($entryIdsForList)) {
             <div id="bulkPrzemieszczenieContainer">
                 <h3>Nowe przemieszczenie dla całej listy</h3>
                 <form method="post" class="bulk-form">
+                    <?= appCsrfField() ?>
                     <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
                     <input type="hidden" name="add_bulk_przemieszczenie" value="1">
 

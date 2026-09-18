@@ -1,11 +1,8 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 if (isset($_SESSION['user_id'])) {
     header('Location: index.php');
     exit;
-}
-if (empty($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 $error = isset($_GET['error']);
 ?>

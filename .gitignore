@@ -4,10 +4,12 @@ db_config.php
 .DS_Store
 gfx/*
 !gfx/.gitkeep
+!gfx/.htaccess
 gfx/thumbs/*
 !gfx/thumbs/.gitkeep
 uploads/*
 !uploads/.gitkeep
+!uploads/.htaccess
 tmp/*
 !tmp/.gitkeep
 !tmp/.htaccess

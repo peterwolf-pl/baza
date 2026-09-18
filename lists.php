@@ -1,18 +1,10 @@
 <?php
-session_start();
-ini_set('display_errors', '0');
-ini_set('display_startup_errors', '0');
-ini_set('log_errors', '1');
-error_reporting(E_ALL);
-
-include 'db.php';
-require_once __DIR__ . '/header.php';
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
-require_once __DIR__ . '/auth.php';
 if (!userCan('edit_lists')) {
     http_response_code(403);
     echo 'Brak uprawnień do edycji list.';
@@ -33,6 +25,9 @@ if (!isset($collections[$selectedCollection])) {
 }
 $mainTable = $collections[$selectedCollection];
 
+include 'db.php';
+require_once __DIR__ . '/header.php';
+
 $columns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);
 if (!in_array('collection', $columns, true)) {
     $pdo->exec("ALTER TABLE lists ADD COLUMN collection VARCHAR(64) NOT NULL DEFAULT 'ksiazki-artystyczne'");
@@ -41,6 +36,10 @@ if (!in_array('collection', $columns, true)) {
 function collectionRedirect(string $collection, string $suffix = ''): void {
     header("Location: lists.php?collection=" . urlencode($collection) . $suffix);
     exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
 }
 
 if (isset($_POST['edit_list']) && isset($_POST['list_id'], $_POST['list_name'])) {
@@ -124,12 +123,14 @@ if (isset($_GET['edit']) && ctype_digit($_GET['edit'])) {
     <?php if ($edit_list): ?>
         <h3>Edycja listy: <?php echo htmlspecialchars($edit_list['list_name']); ?></h3>
         <form method="post" style="margin-bottom:10px;">
+            <?= appCsrfField() ?>
             <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
             <input type="hidden" name="list_id" value="<?php echo $edit_list['id']; ?>">
             <input type="text" name="list_name" value="<?php echo htmlspecialchars($edit_list['list_name']); ?>" required>
             <button type="submit" name="edit_list" class="edit-btn">Zmień nazwę</button>
         </form>
         <form method="post" onsubmit="return confirm('Usunąć całą listę? Wszystkie przypisania zostaną usunięte.');" style="display:inline;">
+            <?= appCsrfField() ?>
             <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
             <input type="hidden" name="list_id" value="<?php echo $edit_list['id']; ?>">
             <button type="submit" name="delete_list" class="delete-btn">Usuń listę</button>
@@ -148,6 +149,7 @@ if (isset($_GET['edit']) && ctype_digit($_GET['edit'])) {
                     <td>
                         <a href="karta.php?id=<?php echo $entry['ID']; ?>&collection=<?php echo urlencode($selectedCollection); ?>" class="edit-btn" target="_blank">Karta</a>
                         <form method="post" class="form-inline" onsubmit="return confirm('Usunąć rekord z listy?');">
+                            <?= appCsrfField() ?>
                             <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
                             <input type="hidden" name="list_id" value="<?php echo $edit_list['id']; ?>">
                             <input type="hidden" name="entry_id" value="<?php echo $entry['ID']; ?>">
@@ -160,6 +162,7 @@ if (isset($_GET['edit']) && ctype_digit($_GET['edit'])) {
         </table>
         <h4>Dodaj rekord do listy (po ID karty):</h4>
         <form method="post" style="margin-bottom:30px;">
+            <?= appCsrfField() ?>
             <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
             <input type="hidden" name="list_id" value="<?php echo $edit_list['id']; ?>">
             <input type="number" name="entry_id" placeholder="ID rekordu" min="1" required>
@@ -184,6 +187,7 @@ if (isset($_GET['edit']) && ctype_digit($_GET['edit'])) {
                 <td>
                     <a href="lists.php?collection=<?php echo urlencode($selectedCollection); ?>&edit=<?php echo $list['id']; ?>" class="edit-btn">Edytuj/Zobacz</a>
                     <form method="post" class="form-inline" onsubmit="return confirm('Usunąć tę listę?');">
+                        <?= appCsrfField() ?>
                         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
                         <input type="hidden" name="list_id" value="<?php echo $list['id']; ?>">
                         <button type="submit" name="delete_list" class="delete-btn">Usuń</button>

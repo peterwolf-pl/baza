@@ -1,5 +1,5 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 
 header('Content-Type: application/json');
@@ -24,7 +24,7 @@ try {
         echo json_encode(['success' => false, 'message' => 'Brak uprawnień.']);
         exit;
     }
-    require_once __DIR__ . '/auth.php';
+    appRequireCsrf();
     if (!userCan('edit_lists')) {
         echo json_encode(['success' => false, 'message' => 'Brak uprawnień do edycji list.']);
         exit;

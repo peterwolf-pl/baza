@@ -1,6 +1,5 @@
 <?php
-session_start();
-require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 
 function ensurePasswordResetTables(PDO $pdo): void {
@@ -25,6 +24,7 @@ ensurePasswordResetTables($pdo);
 $message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
     $email = trim((string)($_POST['email'] ?? ''));
     if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $message = 'Podaj poprawny adres e-mail.';
@@ -66,6 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <h2>Nie pamiętam hasła</h2>
     <?php if ($message !== ''): ?><p><?= htmlspecialchars($message) ?></p><?php endif; ?>
     <form method="post" style="max-width:480px;">
+        <?= appCsrfField() ?>
         <label for="email">E-mail</label>
         <input type="email" id="email" name="email" required>
         <button type="submit" id="toggleButton">Wyślij link resetu</button>

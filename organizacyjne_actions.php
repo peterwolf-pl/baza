@@ -1,12 +1,11 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
 }
 
-require_once __DIR__ . '/auth.php';
 if (!userCan('generate_reports')) {
     http_response_code(403);
     echo 'Brak uprawnień do generowania raportów i eksportów.';

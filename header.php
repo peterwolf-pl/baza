@@ -95,6 +95,28 @@ if (!function_exists('renderAppHeader')) {
                 . '</div>';
         }
         ?>
+        <script>
+        (function () {
+            window.APP_CSRF_TOKEN = <?php echo json_encode(appEnsureCsrfToken(), JSON_UNESCAPED_SLASHES); ?> || window.APP_CSRF_TOKEN || '';
+            if (window.__appCsrfFetchPatched || typeof window.fetch !== 'function') {
+                return;
+            }
+            window.__appCsrfFetchPatched = true;
+            var originalFetch = window.fetch;
+            window.fetch = function (input, init) {
+                init = init || {};
+                var method = String(init.method || 'GET').toUpperCase();
+                if (method !== 'GET' && method !== 'HEAD' && window.APP_CSRF_TOKEN) {
+                    var headers = new Headers(init.headers || {});
+                    if (!headers.has('X-CSRF-Token')) {
+                        headers.set('X-CSRF-Token', window.APP_CSRF_TOKEN);
+                    }
+                    init = Object.assign({}, init, { headers: headers });
+                }
+                return originalFetch.call(this, input, init);
+            };
+        })();
+        </script>
         <div class="app-header">
             <div class="app-header-top">
                 <a class="app-header-logo-link" href="<?php echo $esc($logoHref); ?>">
@@ -151,8 +173,7 @@ if (!function_exists('renderAppHeader')) {
                                      <?php if ($canAccessAdmin): ?><a href="admin.php">Panel administracyjny</a><?php endif; ?>
                                     <div class="app-header-dropdown-separator" aria-hidden="true">-------------</div>
                                     <a href="project_info.php">Info</a>
-                                    
-                                   
+                                    <a href="generate_thumbnails.php?collection=<?php echo $esc(rawurlencode($selectedCollection)); ?>&amp;ledger=<?php echo $esc(rawurlencode($selectedLedger)); ?>">Generowanie miniatur</a>
                                     <?php if ($canImportInventory): ?><a href="inventory_import.php?collection=<?php echo $esc(rawurlencode($selectedCollection)); ?>&amp;ledger=<?php echo $esc(rawurlencode($selectedLedger)); ?>">Import Excel / CSV</a><?php endif; ?>
                                     <?php if ($canImportInventory): ?><a href="ean_labels.php?collection=<?php echo $esc(rawurlencode($selectedCollection)); ?>&amp;ledger=<?php echo $esc(rawurlencode($selectedLedger)); ?>">Generator kodów paskowych EAN (PDF)</a><?php endif; ?>
                                     <div class="app-header-dropdown-separator" aria-hidden="true">-------------</div>

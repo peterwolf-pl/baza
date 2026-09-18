@@ -1,8 +1,7 @@
 <?php
-session_start();
+require_once __DIR__ . '/bootstrap.php';
 
 include 'db.php';
-require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/museum_system.php';
 
 function userCanCreateEntries(): bool {
@@ -66,77 +65,6 @@ function isMobileDevice(): bool {
     return preg_match('/android|iphone|ipad|ipod|mobile|blackberry|windows phone/', $agent) === 1;
 }
 
-function createThumbnail(string $sourcePath, string $thumbPath, int $targetHeight = 125, int $quality = 70): bool {
-    if (!extension_loaded('gd')) {
-        return false;
-    }
-
-    $imageInfo = @getimagesize($sourcePath);
-    if (!$imageInfo || empty($imageInfo[0]) || empty($imageInfo[1])) {
-        return false;
-    }
-
-    [$sourceWidth, $sourceHeight, $imageType] = $imageInfo;
-    if ($sourceHeight <= 0) {
-        return false;
-    }
-
-    $targetWidth = max(1, (int)round($sourceWidth * ($targetHeight / $sourceHeight)));
-
-    $createMap = [
-        IMAGETYPE_JPEG => 'imagecreatefromjpeg',
-        IMAGETYPE_PNG => 'imagecreatefrompng',
-        IMAGETYPE_GIF => 'imagecreatefromgif',
-        IMAGETYPE_WEBP => 'imagecreatefromwebp',
-    ];
-
-    if (!isset($createMap[$imageType]) || !function_exists($createMap[$imageType])) {
-        return false;
-    }
-
-    $sourceImage = @$createMap[$imageType]($sourcePath);
-    if ($sourceImage === false) {
-        return false;
-    }
-
-    $thumbImage = imagecreatetruecolor($targetWidth, $targetHeight);
-    if ($thumbImage === false) {
-        imagedestroy($sourceImage);
-        return false;
-    }
-
-    if (in_array($imageType, [IMAGETYPE_PNG, IMAGETYPE_GIF], true)) {
-        imagealphablending($thumbImage, false);
-        imagesavealpha($thumbImage, true);
-        $transparent = imagecolorallocatealpha($thumbImage, 0, 0, 0, 127);
-        imagefilledrectangle($thumbImage, 0, 0, $targetWidth, $targetHeight, $transparent);
-    }
-
-    imagecopyresampled($thumbImage, $sourceImage, 0, 0, 0, 0, $targetWidth, $targetHeight, $sourceWidth, $sourceHeight);
-
-    $result = false;
-    switch ($imageType) {
-        case IMAGETYPE_JPEG:
-            $result = imagejpeg($thumbImage, $thumbPath, $quality);
-            break;
-        case IMAGETYPE_PNG:
-            $pngCompression = (int)round((100 - $quality) * 9 / 100);
-            $result = imagepng($thumbImage, $thumbPath, max(0, min(9, $pngCompression)));
-            break;
-        case IMAGETYPE_GIF:
-            $result = imagegif($thumbImage, $thumbPath);
-            break;
-        case IMAGETYPE_WEBP:
-            $result = imagewebp($thumbImage, $thumbPath, $quality);
-            break;
-    }
-
-    imagedestroy($thumbImage);
-    imagedestroy($sourceImage);
-
-    return $result;
-}
-
 function normalizeUploadedPhotos(array $fileField): array {
     $photos = [];
     if (!isset($fileField['error'])) {
@@ -166,28 +94,14 @@ function normalizeUploadedPhotos(array $fileField): array {
     ));
 }
 
-function storeMobilePhoto(array $photo): ?string {
+function storeMobilePhoto(array $photo): string {
     $uploadDir = __DIR__ . '/gfx';
     $thumbDir = $uploadDir . '/thumbs';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0775, true);
+    $targetName = museumStoreUploadedImage($photo, $uploadDir, 'mobile_');
+    if (!is_dir($thumbDir) && !@mkdir($thumbDir, 0775, true) && !is_dir($thumbDir)) {
+        throw new RuntimeException('Nie udało się utworzyć katalogu miniatur.');
     }
-    if (!is_dir($thumbDir)) {
-        mkdir($thumbDir, 0775, true);
-    }
-
-    $originalName = basename($photo['name']);
-    $safeName = museumSanitizeFilename($originalName);
-    $safeName = $safeName !== '' ? $safeName : ('zdjecie_' . date('Ymd_His') . '.jpg');
-    $targetName = uniqid('mobile_', true) . '_' . $safeName;
-    $targetPath = $uploadDir . '/' . $targetName;
-    $thumbPath = $thumbDir . '/' . $targetName;
-
-    if (!move_uploaded_file($photo['tmp_name'], $targetPath)) {
-        return null;
-    }
-
-    createThumbnail($targetPath, $thumbPath, 125, 70);
+    museumCreateThumbnail($uploadDir . '/' . $targetName, $thumbDir . '/' . $targetName, 125, 70);
     return $targetName;
 }
 
@@ -271,6 +185,7 @@ $formError = null;
 $justSaved = isset($_GET['saved']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    appRequireCsrf();
     if (!userCanCreateEntries()) {
         http_response_code(403);
         $formError = 'Brak uprawnień do tworzenia wpisów do księgi inwentarzowej.';
@@ -372,12 +287,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Throwable $ignored) {
                     }
                 } elseif (($e->getCode() ?? '') === '23000') {
-                    $formError = 'Błąd dodawania (naruszenie ograniczenia danych, nie dotyczy numer_ewidencyjny): ' . $e->getMessage();
+                    appLogException('mobile_add.php constraint', $e);
+                    $formError = 'Błąd dodawania: naruszenie ograniczenia danych.';
                 } else {
-                    $formError = 'Błąd dodawania: ' . $e->getMessage();
+                    appLogException('mobile_add.php', $e);
+                    $formError = 'Błąd dodawania wpisu.';
                 }
             } catch (RuntimeException $e) {
-                $formError = 'Błąd dodawania: ' . $e->getMessage();
+                appLogException('mobile_add.php runtime', $e);
+                $formError = $e->getMessage();
             }
         }
     }
@@ -462,6 +380,7 @@ $seriesEntries = is_array($series) ? ($series['entries'] ?? []) : [];
             <p class="error">Nie masz uprawnień do tworzenia nowych wpisów.</p>
         <?php else: ?>
         <form method="post" class="mobile-add-form" enctype="multipart/form-data">
+            <?= appCsrfField() ?>
             <label class="multi-toggle">
                 <input type="checkbox" name="multiple_mode" id="multiple_mode" value="1" <?php echo $multipleChecked ? 'checked' : ''; ?>>
                 <span>Tryb wielokrotny — ten sam tytuł i autor, każde zdjęcie = nowy wpis</span>

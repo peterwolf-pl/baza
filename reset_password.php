@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/bootstrap.php';
 include 'db.php';
 
 $pdo->exec(
@@ -41,6 +41,7 @@ if ($token === '') {
     if (!$matched) {
         $message = 'Link resetu jest nieprawidłowy lub wygasł.';
     } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        appRequireCsrf();
         $password = (string)($_POST['new_password'] ?? '');
         $confirm = (string)($_POST['confirm_password'] ?? '');
         if (strlen($password) < 8) {
@@ -74,6 +75,7 @@ if ($token === '') {
     <?php if ($message !== ''): ?><p><?= htmlspecialchars($message) ?></p><?php endif; ?>
     <?php if ($showForm && !$ok): ?>
         <form method="post" style="max-width:480px;">
+            <?= appCsrfField() ?>
             <input type="hidden" name="t" value="<?= htmlspecialchars($token) ?>">
             <label for="new_password">Nowe hasło</label>
             <input type="password" id="new_password" name="new_password" required minlength="8">

@@ -22,14 +22,60 @@ function appCsrfField(): string
         . '">';
 }
 
+function appCsrfTokenFromRequest(): string
+{
+    $post = $_POST['csrf_token'] ?? '';
+    if (is_string($post) && $post !== '') {
+        return $post;
+    }
+
+    foreach (['HTTP_X_CSRF_TOKEN', 'HTTP_X_CSRFTOKEN'] as $headerName) {
+        $header = $_SERVER[$headerName] ?? '';
+        if (is_string($header) && $header !== '') {
+            return $header;
+        }
+    }
+
+    return '';
+}
+
 function appVerifyCsrf(?string $token = null): bool
 {
     if (session_status() !== PHP_SESSION_ACTIVE) {
         return false;
     }
     $expected = $_SESSION['csrf_token'] ?? '';
-    $provided = $token ?? (string)($_POST['csrf_token'] ?? '');
-    return is_string($expected) && $expected !== '' && hash_equals($expected, $provided);
+    $provided = ($token !== null && $token !== '') ? $token : appCsrfTokenFromRequest();
+    return is_string($expected) && $expected !== '' && $provided !== '' && hash_equals($expected, $provided);
+}
+
+function appRequireCsrf(): void
+{
+    if (appVerifyCsrf()) {
+        return;
+    }
+
+    $contentType = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
+    $accept = strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));
+    $isJson = str_contains($contentType, 'application/json') || str_contains($accept, 'application/json');
+
+    http_response_code(403);
+    if ($isJson) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'success' => false,
+            'message' => 'Nieprawidłowy token CSRF. Odśwież stronę i spróbuj ponownie.',
+        ]);
+    } else {
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Nieprawidłowy token CSRF. Odśwież stronę i spróbuj ponownie.';
+    }
+    exit;
+}
+
+function appLogException(string $context, Throwable $e): void
+{
+    error_log($context . ': ' . $e->getMessage());
 }
 
 function userIsRoot(): bool
