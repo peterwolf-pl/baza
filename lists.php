@@ -1,13 +1,20 @@
 <?php
 session_start();
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
 error_reporting(E_ALL);
 
 include 'db.php';
+require_once __DIR__ . '/header.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
+    exit;
+}
+if (empty($_SESSION['can_edit_lists']) && empty($_SESSION['is_root'])) {
+    http_response_code(403);
+    echo 'Brak uprawnień do edycji list.';
     exit;
 }
 
@@ -16,6 +23,7 @@ $collections = [
     'kolekcja-maszyn' => 'karta_ewidencyjna_maszyny',
     'kolekcja-matryc' => 'karta_ewidencyjna_matryce',
     'biblioteka' => 'karta_ewidencyjna_bib',
+    'kolekcja-klisz' => 'karta_ewidencyjna_klisze',
 ];
 
 $selectedCollection = $_GET['collection'] ?? ($_POST['collection'] ?? 'ksiazki-artystyczne');
@@ -67,6 +75,7 @@ if (isset($_POST['add_entry']) && isset($_POST['list_id'], $_POST['entry_id'])) 
 $listStmt = $pdo->prepare("SELECT * FROM lists WHERE collection = ? ORDER BY list_name");
 $listStmt->execute([$selectedCollection]);
 $lists = $listStmt->fetchAll(PDO::FETCH_ASSOC);
+$username = $_SESSION['username'] ?? '';
 
 $edit_list = null;
 $list_entries = [];
@@ -95,7 +104,20 @@ if (isset($_GET['edit']) && ctype_digit($_GET['edit'])) {
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>" class="back-link">Powrót do strony głównej</a>
+    <?php
+    renderAppHeader([
+        'selectedCollection' => $selectedCollection,
+        'collections' => $collections,
+        'lists' => $lists,
+        'username' => $username,
+        'logoHref' => 'index.php?collection=' . rawurlencode($selectedCollection),
+        'showColumnButton' => false,
+        'showListEditor' => false,
+        'primaryActions' => [
+            ['label' => 'Powrót do strony głównej', 'href' => 'index.php?collection=' . rawurlencode($selectedCollection)],
+        ],
+    ]);
+    ?>
     <h2>Listy (<?php echo htmlspecialchars($selectedCollection); ?>)</h2>
 
     <?php if ($edit_list): ?>
@@ -170,5 +192,6 @@ if (isset($_GET['edit']) && ctype_digit($_GET['edit'])) {
             <?php endforeach; ?>
         </tbody>
     </table>
+    <?php include __DIR__ . '/footer.php'; ?>
 </body>
 </html>

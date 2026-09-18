@@ -2,19 +2,26 @@
 session_start();
 
 include 'db.php';
+require_once __DIR__ . '/museum_system.php';
+
+function userCanCreateEntries(): bool {
+    return !empty($_SESSION['can_inventory_entries']);
+}
 
 $collections = [
-    'ksiazki-artystyczne' => 'karta_ewidencyjna',
-    'kolekcja-maszyn' => 'karta_ewidencyjna_maszyny',
-    'kolekcja-matryc' => 'karta_ewidencyjna_matryce',
-    'biblioteka' => 'karta_ewidencyjna_bib',
+    'ksiazki-artystyczne' => ['main' => 'karta_ewidencyjna', 'log' => 'karta_ewidencyjna_log'],
+    'kolekcja-maszyn' => ['main' => 'karta_ewidencyjna_maszyny', 'log' => 'karta_ewidencyjna_maszyny_log'],
+    'kolekcja-matryc' => ['main' => 'karta_ewidencyjna_matryce', 'log' => 'karta_ewidencyjna_matryce_log'],
+    'biblioteka' => ['main' => 'karta_ewidencyjna_bib', 'log' => 'karta_ewidencyjna_bib_log'],
+    'kolekcja-klisz' => ['main' => 'karta_ewidencyjna_klisze', 'log' => 'karta_ewidencyjna_klisze_log'],
 ];
 
 $selectedCollection = $_GET['collection'] ?? 'ksiazki-artystyczne';
 if (!isset($collections[$selectedCollection])) {
     $selectedCollection = 'ksiazki-artystyczne';
 }
-$mainTable = $collections[$selectedCollection];
+$mainTable = $collections[$selectedCollection]['main'];
+$logTable = $collections[$selectedCollection]['log'];
 
 function ensureMobileTokenTable(PDO $pdo): void {
     $pdo->exec(
@@ -39,11 +46,6 @@ function getPrimaryKeyColumn(PDO $pdo, string $table): ?string {
     }
 
     return null;
-}
-
-function nextNumericValue(PDO $pdo, string $table, string $column): int {
-    $stmt = $pdo->query("SELECT COALESCE(MAX(CAST({$column} AS UNSIGNED)), 0) + 1 AS next_val FROM {$table}");
-    return (int)$stmt->fetchColumn();
 }
 
 function currentProcessingDate(PDO $pdo, string $table): string {
@@ -134,6 +136,60 @@ function createThumbnail(string $sourcePath, string $thumbPath, int $targetHeigh
     return $result;
 }
 
+function normalizeUploadedPhotos(array $fileField): array {
+    $photos = [];
+    if (!isset($fileField['error'])) {
+        return $photos;
+    }
+
+    if (is_array($fileField['error'])) {
+        $count = count($fileField['error']);
+        for ($i = 0; $i < $count; $i++) {
+            $photos[] = [
+                'name' => (string)($fileField['name'][$i] ?? ''),
+                'tmp_name' => (string)($fileField['tmp_name'][$i] ?? ''),
+                'error' => (int)$fileField['error'][$i],
+            ];
+        }
+    } else {
+        $photos[] = [
+            'name' => (string)($fileField['name'] ?? ''),
+            'tmp_name' => (string)($fileField['tmp_name'] ?? ''),
+            'error' => (int)$fileField['error'],
+        ];
+    }
+
+    return array_values(array_filter(
+        $photos,
+        static fn(array $photo): bool => $photo['error'] === UPLOAD_ERR_OK && is_uploaded_file($photo['tmp_name'])
+    ));
+}
+
+function storeMobilePhoto(array $photo): ?string {
+    $uploadDir = __DIR__ . '/gfx';
+    $thumbDir = $uploadDir . '/thumbs';
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0775, true);
+    }
+    if (!is_dir($thumbDir)) {
+        mkdir($thumbDir, 0775, true);
+    }
+
+    $originalName = basename($photo['name']);
+    $safeName = preg_replace('/[^A-Za-z0-9._-]/', '_', $originalName);
+    $safeName = $safeName ?: ('zdjecie_' . date('Ymd_His') . '.jpg');
+    $targetName = uniqid('mobile_', true) . '_' . $safeName;
+    $targetPath = $uploadDir . '/' . $targetName;
+    $thumbPath = $thumbDir . '/' . $targetName;
+
+    if (!move_uploaded_file($photo['tmp_name'], $targetPath)) {
+        return null;
+    }
+
+    createThumbnail($targetPath, $thumbPath, 125, 70);
+    return $targetName;
+}
+
 $valid_columns = [
     'numer_ewidencyjny', 'nazwa_tytul', 'czas_powstania', 'inne_numery_ewidencyjne',
     'autor_wytworca', 'miejsce_powstania', 'liczba', 'material',
@@ -160,6 +216,13 @@ if (!isset($_SESSION['user_id']) && isset($_GET['token'])) {
     if ($tokenData) {
         $_SESSION['user_id'] = (int)$tokenData['user_id'];
         $_SESSION['username'] = $tokenData['username'];
+        $permStmt = $pdo->prepare('SELECT can_inventory_entries, can_update_records, can_manage_deposits, can_generate_reports FROM karta_ewidencyjna_users WHERE id = :id LIMIT 1');
+        $permStmt->execute(['id' => (int)$tokenData['user_id']]);
+        $permUser = $permStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $_SESSION['can_inventory_entries'] = (int)($permUser['can_inventory_entries'] ?? 0);
+        $_SESSION['can_update_records'] = (int)($permUser['can_update_records'] ?? 0);
+        $_SESSION['can_manage_deposits'] = (int)($permUser['can_manage_deposits'] ?? 0);
+        $_SESSION['can_generate_reports'] = (int)($permUser['can_generate_reports'] ?? 0);
 
         $markUsed = $pdo->prepare('UPDATE mobile_login_tokens SET used = 1 WHERE token = :token');
         $markUsed->execute(['token' => $token]);
@@ -173,6 +236,12 @@ if (!isset($_SESSION['user_id']) && isset($_GET['token'])) {
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
+    exit;
+}
+
+if (isset($_GET['clear_series'])) {
+    unset($_SESSION['mobile_add_series']);
+    header('Location: mobile_add.php?collection=' . urlencode($selectedCollection) . '&mobile=1');
     exit;
 }
 
@@ -199,70 +268,130 @@ if (!$isMobile && $_SERVER['REQUEST_METHOD'] !== 'POST') {
     $qrUrl = $scheme . '://' . $host . $basePath . '/mobile_add.php?collection=' . urlencode($selectedCollection) . '&token=' . urlencode($token);
 }
 
+$formError = null;
+$justSaved = isset($_GET['saved']);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    try {
-        $photoName = null;
-        if (isset($_FILES['mobile_photo']) && $_FILES['mobile_photo']['error'] === UPLOAD_ERR_OK) {
-            $uploadDir = __DIR__ . '/gfx';
-            $thumbDir = $uploadDir . '/thumbs';
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0775, true);
-            }
-            if (!is_dir($thumbDir)) {
-                mkdir($thumbDir, 0775, true);
+    if (!userCanCreateEntries()) {
+        http_response_code(403);
+        $formError = 'Brak uprawnień do tworzenia wpisów do księgi inwentarzowej.';
+    } else {
+        $multipleMode = isset($_POST['multiple_mode']);
+        $title = trim((string)($_POST['nazwa_tytul'] ?? ''));
+        $author = trim((string)($_POST['autor_wytworca'] ?? ''));
+        $photos = isset($_FILES['mobile_photo']) ? normalizeUploadedPhotos($_FILES['mobile_photo']) : [];
+
+        if ($title === '' || $author === '') {
+            $formError = 'Podaj tytuł i autora.';
+        } elseif ($multipleMode && $photos === []) {
+            $formError = 'W trybie wielokrotnym każde zdjęcie tworzy nowy wpis — zrób lub wybierz zdjęcie.';
+        } else {
+            if ($photos === []) {
+                $photos = [null];
             }
 
-            $originalName = basename((string)$_FILES['mobile_photo']['name']);
-            $safeName = preg_replace('/[^A-Za-z0-9._-]/', '_', $originalName);
-            $safeName = $safeName ?: ('zdjecie_' . date('Ymd_His') . '.jpg');
-            $targetName = uniqid('mobile_', true) . '_' . $safeName;
-            $targetPath = $uploadDir . '/' . $targetName;
-            $thumbPath = $thumbDir . '/' . $targetName;
+            try {
+                museumEnsureUniqueInventoryNumberConstraint($pdo, $mainTable);
+                $created = [];
 
-            if (move_uploaded_file($_FILES['mobile_photo']['tmp_name'], $targetPath)) {
-                $photoName = $targetName;
-                createThumbnail($targetPath, $thumbPath, 125, 70);
+                foreach ($photos as $photo) {
+                    $photoName = $photo ? storeMobilePhoto($photo) : null;
+
+                    $new_data = [];
+                    foreach ($valid_columns as $column) {
+                        if ($column === 'numer_ewidencyjny') {
+                            $new_data[$column] = museumNextInventoryNumberFromTable($pdo, $mainTable, $selectedCollection);
+                        } elseif ($column === 'data_opracowania') {
+                            $new_data[$column] = currentProcessingDate($pdo, $mainTable);
+                        } elseif ($column === 'opracowujacy') {
+                            $new_data[$column] = $_SESSION['username'] ?? null;
+                        } elseif ($column === 'nazwa_tytul') {
+                            $new_data[$column] = $title;
+                        } elseif ($column === 'autor_wytworca') {
+                            $new_data[$column] = $author;
+                        } elseif ($column === 'dokumentacja_wizualna') {
+                            $new_data[$column] = $photoName;
+                        } else {
+                            $new_data[$column] = null;
+                        }
+                    }
+
+                    $sql = 'INSERT INTO ' . $mainTable . ' (' . implode(', ', array_keys($new_data)) . ') VALUES ('
+                        . implode(', ', array_map(fn($key) => ':' . $key, array_keys($new_data))) . ')';
+
+                    $insert_stmt = $pdo->prepare($sql);
+                    $insert_stmt->execute($new_data);
+
+                    $newId = (int)$pdo->lastInsertId();
+
+                    $logStmt = $pdo->prepare("INSERT INTO {$logTable}
+                        (karta_id, user_username, changed_field, old_value, new_value, change_date)
+                        VALUES (:karta_id, :user_username, :changed_field, :old_value, :new_value, NOW())");
+                    $logStmt->execute([
+                        'karta_id' => $newId,
+                        'user_username' => $_SESSION['username'] ?? null,
+                        'changed_field' => 'Utworzenie wpisu',
+                        'old_value' => null,
+                        'new_value' => $multipleMode ? 'Utworzenie wpisu (seria zdjęć)' : 'Utworzenie wpisu',
+                    ]);
+
+                    $created[] = [
+                        'id' => $newId,
+                        'numer' => $new_data['numer_ewidencyjny'],
+                    ];
+                }
+
+                if ($multipleMode) {
+                    $series = $_SESSION['mobile_add_series'] ?? [
+                        'collection' => $selectedCollection,
+                        'nazwa_tytul' => $title,
+                        'autor_wytworca' => $author,
+                        'entries' => [],
+                    ];
+                    $series['collection'] = $selectedCollection;
+                    $series['nazwa_tytul'] = $title;
+                    $series['autor_wytworca'] = $author;
+                    $series['entries'] = array_merge($series['entries'], $created);
+                    $_SESSION['mobile_add_series'] = $series;
+
+                    header('Location: mobile_add.php?collection=' . urlencode($selectedCollection) . '&mobile=1&saved=1');
+                    exit;
+                }
+
+                $last = $created[count($created) - 1];
+                header('Location: karta.php?id=' . (int)$last['id'] . '&collection=' . urlencode($selectedCollection) . '&from_mobile_add=1');
+                exit;
+            } catch (PDOException $e) {
+                if (($e->getCode() ?? '') === '23000' && museumIsInventoryNumberConstraintViolation($e)) {
+                    $attemptedInventoryNumber = isset($new_data['numer_ewidencyjny']) ? (string)$new_data['numer_ewidencyjny'] : 'XX';
+                    $formError = 'Błąd dodawania: numer inwentarzowy ' . $attemptedInventoryNumber . ' już istnieje (wymuszona unikalność).';
+                    try {
+                        $suggestedNumber = museumSuggestedNextInventoryNumberAfterDuplicate($pdo, $mainTable, $selectedCollection, $attemptedInventoryNumber);
+                        if ($suggestedNumber > 0) {
+                            $formError .= ' Proponowany kolejny numer: ' . $suggestedNumber . '.';
+                        }
+                    } catch (Throwable $ignored) {
+                    }
+                } elseif (($e->getCode() ?? '') === '23000') {
+                    $formError = 'Błąd dodawania (naruszenie ograniczenia danych, nie dotyczy numer_ewidencyjny): ' . $e->getMessage();
+                } else {
+                    $formError = 'Błąd dodawania: ' . $e->getMessage();
+                }
+            } catch (RuntimeException $e) {
+                $formError = 'Błąd dodawania: ' . $e->getMessage();
             }
         }
-
-        $new_data = [];
-        foreach ($valid_columns as $column) {
-            if ($column === 'numer_ewidencyjny') {
-                $new_data[$column] = nextNumericValue($pdo, $mainTable, 'numer_ewidencyjny');
-            } elseif ($column === 'data_opracowania') {
-                $new_data[$column] = currentProcessingDate($pdo, $mainTable);
-            } elseif ($column === 'opracowujacy') {
-                $new_data[$column] = $_SESSION['username'] ?? null;
-            } elseif ($column === 'nazwa_tytul' || $column === 'autor_wytworca') {
-                $new_data[$column] = trim((string)($_POST[$column] ?? '')) ?: null;
-            } elseif ($column === 'dokumentacja_wizualna') {
-                $new_data[$column] = $photoName;
-            } else {
-                $new_data[$column] = null;
-            }
-        }
-
-        $primaryKeyColumn = getPrimaryKeyColumn($pdo, $mainTable);
-        if ($primaryKeyColumn !== null && !array_key_exists($primaryKeyColumn, $new_data)) {
-            $new_data[$primaryKeyColumn] = nextNumericValue($pdo, $mainTable, $primaryKeyColumn);
-        }
-
-        $sql = 'INSERT INTO ' . $mainTable . ' (' . implode(', ', array_keys($new_data)) . ') VALUES ('
-            . implode(', ', array_map(fn($key) => ':' . $key, array_keys($new_data))) . ')';
-
-        $insert_stmt = $pdo->prepare($sql);
-        $insert_stmt->execute($new_data);
-
-        $newId = isset($primaryKeyColumn, $new_data[$primaryKeyColumn])
-            ? (int)$new_data[$primaryKeyColumn]
-            : (int)$pdo->lastInsertId();
-
-        header('Location: karta.php?id=' . $newId . '&collection=' . urlencode($selectedCollection) . '&from_mobile_add=1');
-        exit;
-    } catch (PDOException $e) {
-        $formError = 'Błąd dodawania: ' . $e->getMessage();
     }
 }
+
+$series = $_SESSION['mobile_add_series'] ?? null;
+if (is_array($series) && (($series['collection'] ?? '') !== $selectedCollection)) {
+    $series = null;
+}
+$multipleChecked = $justSaved || is_array($series);
+$prefillTitle = is_array($series) ? (string)($series['nazwa_tytul'] ?? '') : '';
+$prefillAuthor = is_array($series) ? (string)($series['autor_wytworca'] ?? '') : '';
+$seriesEntries = is_array($series) ? ($series['entries'] ?? []) : [];
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -280,6 +409,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .qr-panel { text-align:center; background:#fff; border:1px solid #ddd; border-radius:8px; padding:20px; margin-top:20px; }
         #qrcode { display:flex; justify-content:center; margin: 16px 0; }
         .error { color:#b10000; margin: 10px 0; }
+        .ok { color:#0a7a0a; margin: 10px 0; }
+        .multi-toggle { display:flex; align-items:flex-start; gap:8px; margin: 16px 0; font-weight: bold; }
+        .multi-toggle input { margin-top: 3px; }
+        .series-box { background:#f6f6f6; border:1px solid #ddd; border-radius:8px; padding:12px; margin: 12px 0; }
+        .series-box a { display:inline-block; margin-right:8px; }
     </style>
 </head>
 <body>
@@ -291,7 +425,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <div class="mobile-add-wrapper">
     <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Powrót do listy</a>
-    <h1>Mobile Add</h1>
+    <h1>Fast Mobile Adder</h1>
 
     <?php if (!empty($tokenError)): ?>
         <p class="error"><?php echo htmlspecialchars($tokenError); ?></p>
@@ -308,22 +442,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php if (!empty($formError)): ?>
             <p class="error"><?php echo htmlspecialchars($formError); ?></p>
         <?php endif; ?>
+        <?php if ($justSaved && $seriesEntries): ?>
+            <?php $last = $seriesEntries[count($seriesEntries) - 1]; ?>
+            <p class="ok">Zapisano wpis nr <?php echo htmlspecialchars((string)$last['numer']); ?>. Tytuł i autor zostają — zrób kolejne zdjęcie.</p>
+        <?php endif; ?>
+        <?php if ($seriesEntries): ?>
+            <div class="series-box">
+                <strong>Seria (<?php echo count($seriesEntries); ?>):</strong>
+                <?php foreach ($seriesEntries as $entry): ?>
+                    <a href="karta.php?id=<?php echo (int)$entry['id']; ?>&collection=<?php echo urlencode($selectedCollection); ?>">
+                        #<?php echo htmlspecialchars((string)$entry['numer']); ?>
+                    </a>
+                <?php endforeach; ?>
+                <p>
+                    <a href="mobile_add.php?collection=<?php echo urlencode($selectedCollection); ?>&mobile=1&clear_series=1">Zakończ serię</a>
+                </p>
+            </div>
+        <?php endif; ?>
+        <?php if (!userCanCreateEntries()): ?>
+            <p class="error">Nie masz uprawnień do tworzenia nowych wpisów.</p>
+        <?php else: ?>
         <form method="post" class="mobile-add-form" enctype="multipart/form-data">
+            <label class="multi-toggle">
+                <input type="checkbox" name="multiple_mode" id="multiple_mode" value="1" <?php echo $multipleChecked ? 'checked' : ''; ?>>
+                <span>Tryb wielokrotny — ten sam tytuł i autor, każde zdjęcie = nowy wpis</span>
+            </label>
+
             <label for="nazwa_tytul">Tytuł</label>
-            <input type="text" name="nazwa_tytul" id="nazwa_tytul" required>
+            <input type="text" name="nazwa_tytul" id="nazwa_tytul" required value="<?php echo htmlspecialchars($prefillTitle); ?>">
 
             <label for="autor_wytworca">Autor</label>
-            <input type="text" name="autor_wytworca" id="autor_wytworca" required>
+            <input type="text" name="autor_wytworca" id="autor_wytworca" required value="<?php echo htmlspecialchars($prefillAuthor); ?>">
 
             <div class="camera-trigger">
                 <button type="button" id="openCamera" aria-label="Otwórz aparat">📷</button>
-                <span id="photoName">Nie wybrano zdjęcia</span>
+                <span id="photoName"><- Kliknij ikone aparatu i zrób zdjęcie</span>
             </div>
-            <input type="file" name="mobile_photo" id="mobile_photo" accept="image/*" capture="environment" style="display:none;">
-
-            <input type="submit" value="Zapisz wpis">
+            <input type="file" name="mobile_photo[]" id="mobile_photo" accept="image/*" capture="environment" style="display:none;">
+<br><br>
+            <input type="submit" id="submitBtn" value="Zapisz wpis">
         </form>
+        <?php endif; ?>
+
     <?php endif; ?>
+    <br><br><br>
+    <p>Po zapisie skrypt bazy generuje miniaturę. <br> Przy ograniczonych zasobach, może to powodować mulenie...<br>
+    Jeśli doświadcasz tego problemu, na jutro przygotuj pełne wiaderko internetu. </p>
 </div>
 
 <?php if (!$isMobile && $qrUrl): ?>
@@ -340,14 +504,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         const openCamera = document.getElementById('openCamera');
         const mobilePhoto = document.getElementById('mobile_photo');
         const photoName = document.getElementById('photoName');
+        const multipleMode = document.getElementById('multiple_mode');
+        const form = document.querySelector('.mobile-add-form');
+        const submitBtn = document.getElementById('submitBtn');
+
+        function applyMultipleUi() {
+            if (!mobilePhoto || !multipleMode || !submitBtn) return;
+            if (multipleMode.checked) {
+                mobilePhoto.setAttribute('multiple', 'multiple');
+                submitBtn.value = 'Zapisz i zrób kolejne';
+                if (photoName && !mobilePhoto.files.length) {
+                    photoName.textContent = 'Zrób zdjęcie — zapisze się od razu, tytuł i autor zostaną';
+                }
+            } else {
+                mobilePhoto.removeAttribute('multiple');
+                submitBtn.value = 'Zapisz wpis';
+                if (photoName && !mobilePhoto.files.length) {
+                    photoName.textContent = '<- Kliknij ikone aparatu i zrób zdjęcie';
+                }
+            }
+        }
+
+        if (multipleMode) {
+            multipleMode.addEventListener('change', applyMultipleUi);
+            applyMultipleUi();
+        }
 
         if (openCamera && mobilePhoto) {
             openCamera.addEventListener('click', () => mobilePhoto.click());
             mobilePhoto.addEventListener('change', () => {
-                photoName.textContent = mobilePhoto.files.length ? mobilePhoto.files[0].name : 'Nie wybrano zdjęcia';
+                const n = mobilePhoto.files ? mobilePhoto.files.length : 0;
+                if (!n) {
+                    photoName.textContent = 'Nie wybrano zdjęcia';
+                    return;
+                }
+                photoName.textContent = n === 1 ? mobilePhoto.files[0].name : (n + ' zdjęć');
+                if (multipleMode && multipleMode.checked && form) {
+                    form.submit();
+                }
             });
         }
     </script>
 <?php endif; ?>
+<?php include __DIR__ . '/footer.php'; ?>
 </body>
 </html>

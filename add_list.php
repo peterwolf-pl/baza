@@ -8,6 +8,10 @@ if (!isset($_SESSION['user_id'])) {
     echo json_encode(['success' => false, 'message' => 'Brak uprawnień.']);
     exit;
 }
+if (empty($_SESSION['can_edit_lists']) && empty($_SESSION['is_root'])) {
+    echo json_encode(['success' => false, 'message' => 'Brak uprawnień do edycji list.']);
+    exit;
+}
 
 function ensureListsCollectionColumn(PDO $pdo): void {
     $columns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);
@@ -16,7 +20,7 @@ function ensureListsCollectionColumn(PDO $pdo): void {
     }
 }
 
-$allowedCollections = ['ksiazki-artystyczne', 'kolekcja-maszyn', 'kolekcja-matryc', 'biblioteka'];
+$allowedCollections = ['ksiazki-artystyczne', 'kolekcja-maszyn', 'kolekcja-matryc', 'biblioteka', 'kolekcja-klisz'];
 
 $input = json_decode(file_get_contents('php://input'), true);
 $name = trim($input['name'] ?? '');

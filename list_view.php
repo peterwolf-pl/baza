@@ -1,10 +1,13 @@
 <?php
 session_start();
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
 error_reporting(E_ALL);
 
 include 'db.php';
+require_once __DIR__ . '/museum_system.php';
+require_once __DIR__ . '/header.php';
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
@@ -28,6 +31,10 @@ $collections = [
     'biblioteka' => [
         'main' => 'karta_ewidencyjna_bib',
         'moves' => 'karta_ewidencyjna_bib_przemieszczenia',
+    ],
+    'kolekcja-klisz' => [
+        'main' => 'karta_ewidencyjna_klisze',
+        'moves' => 'karta_ewidencyjna_klisze_przemieszczenia',
     ],
 ];
 
@@ -66,26 +73,13 @@ function ensureMoveUsernameColumn(PDO $pdo, string $movesTable): bool {
 
 $hasMoveUsernameColumn = ensureMoveUsernameColumn($pdo, $movesTable);
 
-function getNextPrzemieszczenieNumber(PDO $pdo, string $movesTable): string {
-    $stmt = $pdo->query(
-        "SELECT COALESCE(MAX(CAST(numer_przemieszczenia AS UNSIGNED)), 0) + 1
-         FROM {$movesTable}
-         WHERE numer_przemieszczenia REGEXP '^[0-9]+$'"
-    );
-    return (string)$stmt->fetchColumn();
-}
-
 function buildThumbPath(string $encodedPath): string {
     return 'thumbs/' . ltrim($encodedPath, '/');
 }
 
 function buildImagePaths(?string $rawImageValue, string $collection): array {
-    if ($rawImageValue === null) {
-        return [null, null];
-    }
-
-    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
-    if ($normalizedImageValue === '') {
+    $normalizedImageValue = museumNormalizeImageReference($rawImageValue);
+    if ($normalizedImageValue === null) {
         return [null, null];
     }
 
@@ -139,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszcze
             try {
                 $pdo->beginTransaction();
 
-                $numerPrzemieszczenia = getNextPrzemieszczenieNumber($pdo, $movesTable);
+                $numerPrzemieszczenia = (string)museumNextSequenceValue($pdo, museumMoveSequenceKey($selectedCollection));
 
                 if ($hasMoveUsernameColumn) {
                     $insertStmt = $pdo->prepare(
@@ -179,6 +173,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_bulk_przemieszcze
                     $pdo->rollBack();
                 }
                 $bulkMoveError = 'Nie udało się dodać przemieszczeń: ' . $e->getMessage();
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $bulkMoveError = 'Nie udało się dodać przemieszczeń: ' . $e->getMessage();
             }
         }
     }
@@ -199,7 +198,7 @@ $lists = $listsStmt->fetchAll(PDO::FETCH_ASSOC);
 // Domyślne widoczne kolumny
 $defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
 $showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
-$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 25;
 
 if (isset($_POST['show_thumbnail_column'])) {
     $showThumbnailColumn = $_POST['show_thumbnail_column'] === '1';
@@ -238,6 +237,7 @@ if (!$list) {
     echo "Lista nie istnieje.";
     exit;
 }
+$canEditLists = !empty($_SESSION['can_edit_lists']) || !empty($_SESSION['is_root']);
 
 $entryIdsForList = array_values(array_unique(array_map(
     static fn(array $entry): int => (int)($entry['ID'] ?? $entry['id'] ?? 0),
@@ -287,7 +287,6 @@ if (!empty($entryIdsForList)) {
     $commonPrzemieszczenia = $commonMovesStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-$nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -301,6 +300,600 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
         let visibleColumns = <?php echo json_encode($selectedColumns); ?>;
         let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
         const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
+        const currentListId = <?php echo json_encode((int)$list_id); ?>;
+        const canEditLists = <?php echo json_encode($canEditLists); ?>;
+        let scannerMode = null;
+        let scannerBusy = false;
+        let scannerStatusTimerId = null;
+        const scannedRowsByInventory = new Map();
+        const scannerMissingRowsByInventory = new Map();
+        let scannerOriginalFaviconHref = null;
+        const scannerModeSessionKey = `scanner-mode:${selectedCollection}:${currentListId}`;
+        const scannerPresenceSessionKey = `scanner-presence:${selectedCollection}:${currentListId}`;
+        const scannerPresenceState = {
+            presentInventoryNumbers: new Set(),
+            missingInventoryScanCounts: new Map(),
+            lastScanStatus: null
+        };
+        const scannerFeedbackAudioSources = {
+            success: 'audio/ok.mp3',
+            error: 'audio/no.mp3'
+        };
+        const scannerFeedbackAudioCache = {
+            success: null,
+            error: null
+        };
+
+        function tryDecodeInventoryNumberFromEan(value) {
+            const candidate = String(value ?? '').replace(/\s+/g, '').trim();
+            if (!/^\d{13}$/.test(candidate)) {
+                return null;
+            }
+
+            let sum = 0;
+            for (let i = 0; i < 12; i += 1) {
+                const digit = Number.parseInt(candidate.charAt(i), 10);
+                const position = i + 1;
+                sum += position % 2 === 0 ? digit * 3 : digit;
+            }
+            const expectedChecksum = (10 - (sum % 10)) % 10;
+            const actualChecksum = Number.parseInt(candidate.charAt(12), 10);
+            if (expectedChecksum !== actualChecksum) {
+                return null;
+            }
+
+            const inventoryDigits = candidate.slice(3, 12);
+            const normalized = inventoryDigits.replace(/^0+/, '');
+            return normalized === '' ? '0' : normalized;
+        }
+
+        function normalizeInventoryNumber(value) {
+            const trimmed = String(value ?? '').trim();
+            if (trimmed === '') {
+                return '';
+            }
+
+            return tryDecodeInventoryNumberFromEan(trimmed) ?? trimmed;
+        }
+
+        function buildCardUrl(entryId) {
+            const normalizedEntryId = Number.parseInt(String(entryId ?? ''), 10);
+            if (!Number.isInteger(normalizedEntryId) || normalizedEntryId <= 0) {
+                return null;
+            }
+
+            return `karta.php?id=${encodeURIComponent(String(normalizedEntryId))}&collection=${encodeURIComponent(selectedCollection)}`;
+        }
+
+        function focusScannerInput(defer = false) {
+            const scannerInput = document.getElementById('scannerInput');
+            if (!scannerInput || scannerInput.disabled) {
+                return;
+            }
+
+            const applyFocus = () => {
+                scannerInput.focus();
+            };
+
+            applyFocus();
+
+            if (defer) {
+                window.setTimeout(applyFocus, 0);
+            }
+        }
+
+        function getScannerFeedbackAudio(type) {
+            if (type !== 'success' && type !== 'error') {
+                return null;
+            }
+            if (scannerFeedbackAudioCache[type] !== null) {
+                return scannerFeedbackAudioCache[type];
+            }
+
+            const source = scannerFeedbackAudioSources[type];
+            const audio = new Audio(source);
+            audio.preload = 'auto';
+            scannerFeedbackAudioCache[type] = audio;
+            return audio;
+        }
+
+        function playScannerFeedback(type) {
+            const audio = getScannerFeedbackAudio(type);
+            if (!audio) {
+                return;
+            }
+
+            audio.currentTime = 0;
+            const playbackPromise = audio.play();
+            if (playbackPromise && typeof playbackPromise.catch === 'function') {
+                playbackPromise.catch(() => {});
+            }
+        }
+
+        function ensureScannerFaviconLink() {
+            const existingIcon = document.querySelector('link[rel~="icon"]');
+            if (existingIcon) {
+                if (scannerOriginalFaviconHref === null) {
+                    scannerOriginalFaviconHref = existingIcon.getAttribute('href') ?? '';
+                }
+                return existingIcon;
+            }
+
+            const createdIcon = document.createElement('link');
+            createdIcon.rel = 'icon';
+            document.head.appendChild(createdIcon);
+            if (scannerOriginalFaviconHref === null) {
+                scannerOriginalFaviconHref = '';
+            }
+            return createdIcon;
+        }
+
+        function setScannerErrorFavicon() {
+            const faviconNode = ensureScannerFaviconLink();
+            const iconSvg = `
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+                    <rect width="64" height="64" rx="10" fill="#c40000" />
+                    <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central" font-family="Arial, sans-serif" font-size="46" fill="#ffffff" font-weight="700">X</text>
+                </svg>
+            `.trim();
+            faviconNode.href = `data:image/svg+xml,${encodeURIComponent(iconSvg)}`;
+        }
+
+        function restoreScannerFavicon() {
+            if (scannerOriginalFaviconHref === null) {
+                return;
+            }
+            const faviconNode = ensureScannerFaviconLink();
+            if (scannerOriginalFaviconHref === '') {
+                faviconNode.removeAttribute('href');
+                return;
+            }
+            faviconNode.href = scannerOriginalFaviconHref;
+        }
+
+        function syncScannerModeButtons() {
+            const presenceButton = document.getElementById('scannerPresenceButton');
+            const addButton = document.getElementById('scannerAddButton');
+            const cardButton = document.getElementById('scannerCardButton');
+
+            if (presenceButton) {
+                presenceButton.classList.toggle('active', scannerMode === 'presence');
+            }
+            if (addButton) {
+                addButton.classList.toggle('active', scannerMode === 'add');
+            }
+            if (cardButton) {
+                cardButton.classList.toggle('active', scannerMode === 'card');
+            }
+        }
+
+        function saveScannerModeToSession() {
+            try {
+                if (scannerMode === null) {
+                    window.sessionStorage.removeItem(scannerModeSessionKey);
+                    return;
+                }
+                window.sessionStorage.setItem(scannerModeSessionKey, scannerMode);
+            } catch (error) {
+                // Brak dostepu do sessionStorage nie powinien zatrzymywac skanera.
+            }
+        }
+
+        function loadScannerModeFromSession() {
+            try {
+                const savedMode = window.sessionStorage.getItem(scannerModeSessionKey);
+                if (savedMode === 'presence' || savedMode === 'add' || savedMode === 'card') {
+                    scannerMode = savedMode;
+                }
+            } catch (error) {
+                // Brak dostepu do sessionStorage nie powinien zatrzymywac skanera.
+            }
+        }
+
+        function saveScannerPresenceStateToSession() {
+            try {
+                const serializedState = JSON.stringify({
+                    present_inventory_numbers: Array.from(scannerPresenceState.presentInventoryNumbers),
+                    missing_inventory_scan_counts: Array.from(scannerPresenceState.missingInventoryScanCounts.entries()),
+                    last_scan_status: scannerPresenceState.lastScanStatus
+                });
+                window.sessionStorage.setItem(scannerPresenceSessionKey, serializedState);
+            } catch (error) {
+                // Brak dostepu do sessionStorage nie powinien zatrzymywac skanera.
+            }
+        }
+
+        function loadScannerPresenceStateFromSession() {
+            try {
+                const serializedState = window.sessionStorage.getItem(scannerPresenceSessionKey);
+                if (!serializedState) {
+                    return;
+                }
+
+                const parsedState = JSON.parse(serializedState);
+                scannerPresenceState.presentInventoryNumbers.clear();
+                scannerPresenceState.missingInventoryScanCounts.clear();
+                scannerPresenceState.lastScanStatus = null;
+
+                if (Array.isArray(parsedState.present_inventory_numbers)) {
+                    parsedState.present_inventory_numbers.forEach(value => {
+                        const inventoryNumber = normalizeInventoryNumber(value);
+                        if (inventoryNumber !== '') {
+                            scannerPresenceState.presentInventoryNumbers.add(inventoryNumber);
+                        }
+                    });
+                }
+
+                if (Array.isArray(parsedState.missing_inventory_scan_counts)) {
+                    parsedState.missing_inventory_scan_counts.forEach(item => {
+                        if (!Array.isArray(item) || item.length < 2) {
+                            return;
+                        }
+                        const inventoryNumber = normalizeInventoryNumber(item[0]);
+                        const count = Number.parseInt(String(item[1]), 10);
+                        if (inventoryNumber !== '' && Number.isInteger(count) && count > 0) {
+                            scannerPresenceState.missingInventoryScanCounts.set(inventoryNumber, count);
+                        }
+                    });
+                }
+
+                const status = parsedState.last_scan_status;
+                if (status === 'success' || status === 'error') {
+                    scannerPresenceState.lastScanStatus = status;
+                }
+            } catch (error) {
+                // Uszkodzony stan lub brak storage - pomijamy i zaczynamy od zera.
+            }
+        }
+
+        function showScannerStatus(message, type = 'success') {
+            const statusNode = document.getElementById('scannerStatusMessage');
+            if (!statusNode) {
+                return;
+            }
+
+            statusNode.textContent = message;
+            statusNode.hidden = message === '';
+
+            if (message === '') {
+                statusNode.removeAttribute('data-type');
+                return;
+            }
+
+            statusNode.dataset.type = type;
+
+            if (scannerStatusTimerId !== null) {
+                window.clearTimeout(scannerStatusTimerId);
+            }
+
+            scannerStatusTimerId = window.setTimeout(() => {
+                statusNode.textContent = '';
+                statusNode.hidden = true;
+                statusNode.removeAttribute('data-type');
+            }, 3200);
+        }
+
+        function initScannerRowsIndex() {
+            scannedRowsByInventory.clear();
+
+            document.querySelectorAll('tr[data-inventory-number]').forEach(row => {
+                const inventoryNumber = normalizeInventoryNumber(row.dataset.inventoryNumber);
+                if (!inventoryNumber) {
+                    return;
+                }
+
+                if (!scannedRowsByInventory.has(inventoryNumber)) {
+                    scannedRowsByInventory.set(inventoryNumber, []);
+                }
+                scannedRowsByInventory.get(inventoryNumber).push(row);
+            });
+        }
+
+        function markRowsAsPresent(rows) {
+            rows.forEach(row => {
+                row.classList.add('scanner-present-row');
+                const flagNode = row.querySelector('.scanner-present-flag');
+                if (flagNode) {
+                    flagNode.hidden = false;
+                }
+            });
+        }
+
+        function updateMissingRowContent(row, inventoryNumber, count) {
+            const codeNode = row.querySelector('.scanner-missing-code');
+            if (codeNode) {
+                codeNode.textContent = inventoryNumber;
+            }
+
+            const countNode = row.querySelector('.scanner-missing-count');
+            if (countNode) {
+                countNode.textContent = String(count);
+            }
+        }
+
+        function buildMissingRow(inventoryNumber) {
+            const row = document.createElement('tr');
+            row.classList.add('scanner-missing-row');
+            row.dataset.inventoryNumber = inventoryNumber;
+            row.dataset.scanCount = '1';
+
+            const iconCell = document.createElement('td');
+            iconCell.classList.add('scanner-missing-flag-cell');
+
+            const flagNode = document.createElement('span');
+            flagNode.classList.add('scanner-missing-flag');
+            flagNode.setAttribute('aria-label', 'Pozycja spoza listy');
+            flagNode.textContent = 'X';
+            iconCell.appendChild(flagNode);
+
+            const codeCell = document.createElement('td');
+            codeCell.classList.add('scanner-missing-code');
+
+            const countCell = document.createElement('td');
+            countCell.classList.add('scanner-missing-count');
+
+            row.appendChild(iconCell);
+            row.appendChild(codeCell);
+            row.appendChild(countCell);
+
+            updateMissingRowContent(row, inventoryNumber, 1);
+            return row;
+        }
+
+        function applyScannerPresenceStateToUi() {
+            scannerPresenceState.presentInventoryNumbers.forEach(inventoryNumber => {
+                const rows = scannedRowsByInventory.get(inventoryNumber) ?? [];
+                if (rows.length > 0) {
+                    markRowsAsPresent(rows);
+                }
+            });
+
+            const container = document.getElementById('scannerUnknownContainer');
+            const tableBody = document.getElementById('scannerUnknownTableBody');
+            if (container && tableBody) {
+                tableBody.innerHTML = '';
+                scannerMissingRowsByInventory.clear();
+
+                scannerPresenceState.missingInventoryScanCounts.forEach((count, inventoryNumber) => {
+                    if (scannerPresenceState.presentInventoryNumbers.has(inventoryNumber)) {
+                        return;
+                    }
+
+                    const newRow = buildMissingRow(inventoryNumber);
+                    newRow.dataset.scanCount = String(count);
+                    updateMissingRowContent(newRow, inventoryNumber, count);
+                    scannerMissingRowsByInventory.set(inventoryNumber, newRow);
+                    tableBody.appendChild(newRow);
+                });
+
+                container.hidden = scannerMissingRowsByInventory.size === 0;
+            }
+
+            if (scannerPresenceState.lastScanStatus === 'error') {
+                setScannerErrorFavicon();
+            } else if (scannerPresenceState.lastScanStatus === 'success') {
+                restoreScannerFavicon();
+            }
+        }
+
+        function markInventoryAsMissing(inventoryNumber) {
+            const container = document.getElementById('scannerUnknownContainer');
+            const tableBody = document.getElementById('scannerUnknownTableBody');
+            if (!container || !tableBody) {
+                return;
+            }
+
+            const existingRow = scannerMissingRowsByInventory.get(inventoryNumber);
+            if (existingRow) {
+                const nextCount = (Number.parseInt(existingRow.dataset.scanCount ?? '1', 10) || 1) + 1;
+                existingRow.dataset.scanCount = String(nextCount);
+                updateMissingRowContent(existingRow, inventoryNumber, nextCount);
+                container.hidden = false;
+                scannerPresenceState.presentInventoryNumbers.delete(inventoryNumber);
+                scannerPresenceState.missingInventoryScanCounts.set(inventoryNumber, nextCount);
+                scannerPresenceState.lastScanStatus = 'error';
+                saveScannerPresenceStateToSession();
+                return;
+            }
+
+            const newRow = buildMissingRow(inventoryNumber);
+            scannerMissingRowsByInventory.set(inventoryNumber, newRow);
+            tableBody.appendChild(newRow);
+            container.hidden = false;
+            scannerPresenceState.presentInventoryNumbers.delete(inventoryNumber);
+            scannerPresenceState.missingInventoryScanCounts.set(inventoryNumber, 1);
+            scannerPresenceState.lastScanStatus = 'error';
+            saveScannerPresenceStateToSession();
+        }
+
+        function clearMissingInventoryMarker(inventoryNumber) {
+            const row = scannerMissingRowsByInventory.get(inventoryNumber);
+            if (!row) {
+                return;
+            }
+            row.remove();
+            scannerMissingRowsByInventory.delete(inventoryNumber);
+            scannerPresenceState.missingInventoryScanCounts.delete(inventoryNumber);
+            saveScannerPresenceStateToSession();
+
+            const container = document.getElementById('scannerUnknownContainer');
+            if (container && scannerMissingRowsByInventory.size === 0) {
+                container.hidden = true;
+            }
+        }
+
+        function setScannerMode(mode) {
+            const nextMode = mode === 'add' || mode === 'card' ? mode : 'presence';
+            scannerMode = scannerMode === nextMode ? null : nextMode;
+            saveScannerModeToSession();
+            syncScannerModeButtons();
+
+            if (scannerMode === null) {
+                showScannerStatus('Tryb skanera wylaczony.', 'info');
+            }
+
+            focusScannerInput(true);
+        }
+
+        function handlePresenceScan(inventoryNumber) {
+            const rows = scannedRowsByInventory.get(inventoryNumber) ?? [];
+            if (rows.length > 0) {
+                clearMissingInventoryMarker(inventoryNumber);
+                markRowsAsPresent(rows);
+                scannerPresenceState.presentInventoryNumbers.add(inventoryNumber);
+                scannerPresenceState.missingInventoryScanCounts.delete(inventoryNumber);
+                scannerPresenceState.lastScanStatus = 'success';
+                saveScannerPresenceStateToSession();
+                restoreScannerFavicon();
+                showScannerStatus(`Pozycja ${inventoryNumber} jest na liscie i zostala zaznaczona.`, 'success');
+                playScannerFeedback('success');
+                return;
+            }
+
+            markInventoryAsMissing(inventoryNumber);
+            setScannerErrorFavicon();
+            showScannerStatus(`Pozycja ${inventoryNumber} nie nalezy do tej listy.`, 'error');
+            playScannerFeedback('error');
+        }
+
+        async function handleAddModeScan(inventoryNumber) {
+            if (!canEditLists) {
+                showScannerStatus('Brak uprawnien do dodawania pozycji do listy.', 'error');
+                return;
+            }
+            if (scannerBusy) {
+                showScannerStatus('Poczekaj na zakonczenie poprzedniego skanu.', 'info');
+                return;
+            }
+
+            scannerBusy = true;
+            showScannerStatus(`Dodawanie pozycji ${inventoryNumber} do listy...`, 'info');
+
+            try {
+                const response = await fetch('add_to_list_by_inventory.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        list_id: currentListId,
+                        inventory_number: inventoryNumber,
+                        collection: selectedCollection
+                    })
+                });
+                const responseData = await response.json();
+
+                if (!response.ok || !responseData.success) {
+                    const message = responseData.message || 'Nie udalo sie dodac pozycji do listy.';
+                    showScannerStatus(message, 'error');
+                    return;
+                }
+
+                if (responseData.already_exists) {
+                    const rows = scannedRowsByInventory.get(inventoryNumber) ?? [];
+                    if (rows.length > 0) {
+                        markRowsAsPresent(rows);
+                    }
+                    showScannerStatus(`Pozycja ${inventoryNumber} juz byla na tej liscie.`, 'info');
+                    return;
+                }
+
+                showScannerStatus(`Pozycja ${inventoryNumber} zostala dodana. Odswiezanie widoku...`, 'success');
+                window.setTimeout(() => {
+                    window.location.reload();
+                }, 700);
+            } catch (error) {
+                showScannerStatus('Blad polaczenia. Sprobuj ponownie.', 'error');
+            } finally {
+                scannerBusy = false;
+            }
+        }
+
+        async function handleCardModeScan(inventoryNumber) {
+            const rows = scannedRowsByInventory.get(inventoryNumber) ?? [];
+            const localRow = rows.find(row => Number.parseInt(String(row.dataset.entryId ?? ''), 10) > 0);
+            if (localRow) {
+                const localCardUrl = buildCardUrl(localRow.dataset.entryId ?? '');
+                if (localCardUrl !== null) {
+                    showScannerStatus(`Otwieranie karty dla ${inventoryNumber}...`, 'info');
+                    window.location.href = localCardUrl;
+                    return;
+                }
+            }
+
+            if (scannerBusy) {
+                showScannerStatus('Poczekaj na zakonczenie poprzedniego skanu.', 'info');
+                return;
+            }
+
+            scannerBusy = true;
+            showScannerStatus(`Wyszukiwanie karty dla ${inventoryNumber}...`, 'info');
+
+            try {
+                const response = await fetch('find_entry_by_inventory.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        inventory_number: inventoryNumber,
+                        collection: selectedCollection
+                    })
+                });
+                const responseData = await response.json();
+
+                if (!response.ok || !responseData.success) {
+                    const message = responseData.message || 'Nie znaleziono karty dla zeskanowanego numeru.';
+                    showScannerStatus(message, 'error');
+                    return;
+                }
+
+                const cardUrl = buildCardUrl(responseData.entry_id);
+                if (cardUrl === null) {
+                    showScannerStatus('Niepoprawny identyfikator karty.', 'error');
+                    return;
+                }
+
+                showScannerStatus(`Otwieranie karty dla ${inventoryNumber}...`, 'info');
+                window.location.href = cardUrl;
+            } catch (error) {
+                showScannerStatus('Blad polaczenia. Sprobuj ponownie.', 'error');
+            } finally {
+                scannerBusy = false;
+            }
+        }
+
+        async function processScannerScan(rawValue) {
+            const inventoryNumber = normalizeInventoryNumber(rawValue);
+            if (inventoryNumber === '') {
+                return;
+            }
+
+            if (scannerMode === 'add') {
+                await handleAddModeScan(inventoryNumber);
+                return;
+            }
+            if (scannerMode === 'card') {
+                await handleCardModeScan(inventoryNumber);
+                return;
+            }
+            if (scannerMode === 'presence') {
+                handlePresenceScan(inventoryNumber);
+                return;
+            }
+
+            showScannerStatus('Najpierw wlacz tryb skanera.', 'info');
+        }
+
+        async function handleScannerInputKeydown(event) {
+            if (event.key !== 'Enter') {
+                return;
+            }
+
+            event.preventDefault();
+            const inputNode = event.currentTarget;
+            const scannedValue = inputNode.value;
+            inputNode.value = '';
+
+            await processScannerScan(scannedValue);
+            focusScannerInput(true);
+        }
 
         function toggleColumnSelector() {
             const container = document.getElementById('columnSelectorContainer');
@@ -362,6 +955,16 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
 
         window.addEventListener('DOMContentLoaded', () => {
             updateColumnDisplay();
+            initScannerRowsIndex();
+            loadScannerModeFromSession();
+            syncScannerModeButtons();
+            loadScannerPresenceStateFromSession();
+            applyScannerPresenceStateToUi();
+            focusScannerInput();
+            const scannerInput = document.getElementById('scannerInput');
+            if (scannerInput) {
+                scannerInput.addEventListener('keydown', handleScannerInputKeydown);
+            }
             const shouldOpenBulkForm = <?php echo json_encode($bulkMoveSuccess !== null || $bulkMoveError !== null); ?>;
             if (shouldOpenBulkForm) {
                 const container = document.getElementById('bulkPrzemieszczenieContainer');
@@ -439,21 +1042,32 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
     </script>
 </head>
 <body>
-    <div class="header">
-        <a href="https://baza.mkal.pl">
-            <img src="bazamka.png" width="400" alt="Logo bazy Muzeum Książki Artystycznej" class="logo">
-        </a><br>
-        <div class="header-links-left">
-        <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Wróć do głównej</a>
-        <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
-    </div>
-        <div class="header-links">
-            <div class="header-low">
-            <?php foreach ($lists as $l): ?>
-                <a href="list_view.php?list_id=<?php echo (int)$l['id']; ?>&collection=<?php echo urlencode($selectedCollection); ?>"><?php echo htmlspecialchars($l['list_name']); ?></a>
-            <?php endforeach; ?>
-        </div></div>
-    </div>
+    <?php
+    $scannerHeaderHtml = <<<HTML
+        <div class="app-header-scanner app-header-bubble">
+            <strong>Skaner:</strong>
+            <button type="button" id="scannerPresenceButton" class="scanner-mode-button" onclick="setScannerMode('presence')">spr. obecnosc</button>
+            <button type="button" id="scannerAddButton" class="scanner-mode-button" onclick="setScannerMode('add')">dodawanie do listy</button>
+            <button type="button" id="scannerCardButton" class="scanner-mode-button" onclick="setScannerMode('card')">Spr. karty</button>
+            <input type="text" id="scannerInput" class="scanner-input" placeholder="Zeskanuj numer ewidencyjny i nacisnij Enter" autocomplete="off" spellcheck="false">
+            <p id="scannerStatusMessage" class="scanner-status" role="status" aria-live="polite" hidden></p>
+        </div>
+    HTML;
+
+    renderAppHeader([
+        'selectedCollection' => $selectedCollection,
+        'collections' => $collections,
+        'lists' => $lists,
+        'username' => $_SESSION['username'] ?? '',
+        'logoHref' => 'index.php?collection=' . rawurlencode($selectedCollection),
+        'showColumnButton' => true,
+        'showListEditor' => false,
+        'scannerHtml' => $scannerHeaderHtml,
+        'primaryActions' => [
+            ['label' => 'Wróć do głównej', 'href' => 'index.php?collection=' . rawurlencode($selectedCollection)],
+        ],
+    ]);
+    ?>
 
     <h1>Lista: <?php echo htmlspecialchars($list['list_name']); ?></h1>
     
@@ -496,7 +1110,12 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
                 </thead>
                 <tbody>
                     <?php foreach ($entries as $row): ?>
-                        <tr>
+                        <?php
+                        $idField = isset($row['ID']) ? 'ID' : (isset($row['id']) ? 'id' : $columns[0]);
+                        $entryId = isset($row[$idField]) ? (int)$row[$idField] : 0;
+                        $inventoryNumber = trim((string)($row['numer_ewidencyjny'] ?? ''));
+                        ?>
+                        <tr data-entry-id="<?php echo $entryId; ?>" data-inventory-number="<?php echo htmlspecialchars($inventoryNumber, ENT_QUOTES, 'UTF-8'); ?>">
                             <td class="entry-thumbnail-cell thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">
                                 <?php [$thumbnailUrl, $thumbnailFallbackUrl] = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection); ?>
                                 <?php if ($thumbnailUrl !== null): ?>
@@ -511,10 +1130,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
                                 </td>
                             <?php endforeach; ?>
                             <td class="no-highlight">
-                                <?php
-                                $idField = isset($row['ID']) ? 'ID' : (isset($row['id']) ? 'id' : $columns[0]);
-                                $entryId = $row[$idField];
-                                ?>
+                                <span class="scanner-present-flag" aria-label="Pozycja obecna" hidden>&#10003;</span>
                                 <a role="button" id="toggleButton"href="karta.php?id=<?php echo (int)$entryId; ?>&collection=<?php echo urlencode($selectedCollection); ?>">Karta</a>
                                 <select onchange="handleListSelection(this, <?php echo (int)$entryId; ?>)">
                                     <option value="">Dodaj do listy</option>
@@ -534,6 +1150,19 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
                 <button id="toggleBulkPrzemieszczenieButton" type="button" onclick="toggleBulkPrzemieszczenieForm()">Dodaj przemieszczenie całej listy</button>
                 <button id="toggleCommonPrzemieszczeniaButton" type="button" onclick="toggleCommonPrzemieszczenia()">Wspólne przemieszczenia listy</button>
             </div>
+            <div id="scannerUnknownContainer" class="scanner-unknown-container" hidden>
+                <h3>Poza listą (zeskanowane numery ewidencyjne)</h3>
+                <table class="scanner-unknown-table">
+                    <thead>
+                        <tr>
+                            <th>Oznaczenie</th>
+                            <th>Numer ewidencyjny</th>
+                            <th>Liczba skanów</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scannerUnknownTableBody"></tbody>
+                </table>
+            </div>
             <div id="bulkPrzemieszczenieContainer">
                 <h3>Nowe przemieszczenie dla całej listy</h3>
                 <form method="post" class="bulk-form">
@@ -547,7 +1176,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
                     <input type="date" name="data_zwrotu" id="data_zwrotu">
 
                     <label for="numer_przemieszczenia">Numer Przemieszczenia (nadawany automatycznie)</label>
-                    <input type="text" id="numer_przemieszczenia" value="<?php echo htmlspecialchars($nextPrzemieszczeniaNumber); ?>" readonly>
+                    <input type="text" id="numer_przemieszczenia" value="Nadawany przy zapisie" readonly>
 
                     <label for="miejsce_przemieszczenia">Miejsce Przemieszczenia</label>
                     <input type="text" name="miejsce_przemieszczenia" id="miejsce_przemieszczenia" required>
@@ -605,9 +1234,7 @@ $nextPrzemieszczeniaNumber = getNextPrzemieszczenieNumber($pdo, $movesTable);
             <p class="message-error"><?php echo htmlspecialchars($bulkMoveError); ?></p>
         <?php endif; ?>
     </div>
-    <div class="footer-right">
-        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
-    </div>
+    <?php include __DIR__ . '/footer.php'; ?>
     <script>
         // odśwież stan kolumn po SSR
         updateColumnDisplay();

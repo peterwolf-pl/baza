@@ -8,12 +8,18 @@ if (!isset($_SESSION['user_id'])) {
 
 // Połączenie z bazą danych
 include 'db.php';
+require_once __DIR__ . '/museum_system.php';
+
+function userCanCreateEntries(): bool {
+    return !empty($_SESSION['can_inventory_entries']);
+}
 
 $collections = [
-    'ksiazki-artystyczne' => 'karta_ewidencyjna',
-    'kolekcja-maszyn' => 'karta_ewidencyjna_maszyny',
-    'kolekcja-matryc' => 'karta_ewidencyjna_matryce',
-    'biblioteka' => 'karta_ewidencyjna_bib',
+    'ksiazki-artystyczne' => ['main' => 'karta_ewidencyjna', 'log' => 'karta_ewidencyjna_log'],
+    'kolekcja-maszyn' => ['main' => 'karta_ewidencyjna_maszyny', 'log' => 'karta_ewidencyjna_maszyny_log'],
+    'kolekcja-matryc' => ['main' => 'karta_ewidencyjna_matryce', 'log' => 'karta_ewidencyjna_matryce_log'],
+    'biblioteka' => ['main' => 'karta_ewidencyjna_bib', 'log' => 'karta_ewidencyjna_bib_log'],
+    'kolekcja-klisz' => ['main' => 'karta_ewidencyjna_klisze', 'log' => 'karta_ewidencyjna_klisze_log'],
 ];
 
 $selectedCollection = $_GET['collection'] ?? 'ksiazki-artystyczne';
@@ -21,7 +27,8 @@ if (!isset($collections[$selectedCollection])) {
     $selectedCollection = 'ksiazki-artystyczne';
 }
 
-$mainTable = $collections[$selectedCollection];
+$mainTable = $collections[$selectedCollection]['main'];
+$logTable = $collections[$selectedCollection]['log'];
 
 
 function getPrimaryKeyColumn(PDO $pdo, string $table): ?string {
@@ -33,11 +40,6 @@ function getPrimaryKeyColumn(PDO $pdo, string $table): ?string {
     }
 
     return null;
-}
-
-function nextNumericValue(PDO $pdo, string $table, string $column): int {
-    $stmt = $pdo->query("SELECT COALESCE(MAX(CAST({$column} AS UNSIGNED)), 0) + 1 AS next_val FROM {$table}");
-    return (int)$stmt->fetchColumn();
 }
 
 function currentProcessingDate(PDO $pdo, string $table): string {
@@ -64,15 +66,20 @@ $valid_columns = [
 
 // Obsługa formularza dodawania nowej karty
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!userCanCreateEntries()) {
+        http_response_code(403);
+        die('Brak uprawnień do tworzenia wpisów do księgi inwentarzowej.');
+    }
     try {
+        museumEnsureUniqueInventoryNumberConstraint($pdo, $mainTable);
         
 
         // Automatyczne wypełnianie numeru ewidencyjnego i daty opracowania
         $new_data = [];
         foreach ($valid_columns as $column) {
             if ($column === 'numer_ewidencyjny') {
-                // Automatyczne generowanie numeru ewidencyjnego (ostatni numer + 1)
-                $new_data[$column] = nextNumericValue($pdo, $mainTable, 'numer_ewidencyjny');
+                // Synchronizacja do aktualnego maksimum w tabeli + atomowe nadanie kolejnego numeru.
+                $new_data[$column] = museumNextInventoryNumberFromTable($pdo, $mainTable, $selectedCollection);
             } elseif ($column === 'data_opracowania') {
                 // Ustawienie aktualnej daty
                 $new_data[$column] = currentProcessingDate($pdo, $mainTable);
@@ -82,12 +89,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $new_data[$column] = $_POST[$column] ?? null;
                 }
-            }
-        }
 
-        $primaryKeyColumn = getPrimaryKeyColumn($pdo, $mainTable);
-        if ($primaryKeyColumn !== null && !array_key_exists($primaryKeyColumn, $new_data)) {
-            $new_data[$primaryKeyColumn] = nextNumericValue($pdo, $mainTable, $primaryKeyColumn);
+                if ($column === 'dokumentacja_wizualna') {
+                    $sourceImageValue = array_key_exists($column, $_POST) ? (string)$_POST[$column] : null;
+                    $normalizedImageValue = museumNormalizeImageReference($sourceImageValue);
+                    $new_data[$column] = $normalizedImageValue ?? ($sourceImageValue !== null ? '' : null);
+                }
+            }
         }
 
         // Tworzenie zapytania SQL
@@ -98,10 +106,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $insert_stmt->execute($new_data);
 
         // Przeładuj stronę lub przekieruj do nowo utworzonego wpisu
-        $newId = isset($primaryKeyColumn, $new_data[$primaryKeyColumn]) ? (int)$new_data[$primaryKeyColumn] : (int)$pdo->lastInsertId();
+        $newId = (int)$pdo->lastInsertId();
+
+        $logStmt = $pdo->prepare("INSERT INTO {$logTable}
+            (karta_id, user_username, changed_field, old_value, new_value, change_date)
+            VALUES (:karta_id, :user_username, :changed_field, :old_value, :new_value, NOW())");
+        $logStmt->execute([
+            'karta_id' => $newId,
+            'user_username' => $_SESSION['username'] ?? null,
+            'changed_field' => 'Utworzenie wpisu',
+            'old_value' => null,
+            'new_value' => 'Utworzenie wpisu',
+        ]);
+
         header("Location: karta.php?id=" . $newId . "&collection=" . urlencode($selectedCollection));
         exit;
     } catch (PDOException $e) {
+        if (($e->getCode() ?? '') === '23000' && museumIsInventoryNumberConstraintViolation($e)) {
+            $suggestedNumber = null;
+            $attemptedInventoryNumber = isset($new_data['numer_ewidencyjny']) ? (string)$new_data['numer_ewidencyjny'] : 'XX';
+            try {
+                $suggestedNumber = museumSuggestedNextInventoryNumberAfterDuplicate($pdo, $mainTable, $selectedCollection, $attemptedInventoryNumber);
+            } catch (Throwable $ignored) {
+                $suggestedNumber = null;
+            }
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo "Błąd dodawania: numer inwentarzowy " . $attemptedInventoryNumber . " już istnieje (wymuszona unikalność). Spróbuj ponownie.";
+            if ($suggestedNumber !== null && $suggestedNumber > 0) {
+                echo " Proponowany kolejny numer: " . $suggestedNumber . ".";
+            }
+        } elseif (($e->getCode() ?? '') === '23000') {
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo "Błąd dodawania (naruszenie ograniczenia danych, nie dotyczy numer_ewidencyjny): " . $e->getMessage();
+        } else {
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo "Błąd dodawania: " . $e->getMessage();
+        }
+        die();
+    } catch (RuntimeException $e) {
+        header('Content-Type: text/plain; charset=UTF-8');
         echo "Błąd dodawania: " . $e->getMessage();
         die();
     }
@@ -125,9 +168,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Powrót do listy</a> 
     
     <h1>Dodaj Nową Pozycję Ewidencyjną</h1>
+    <?php if (!userCanCreateEntries()): ?>
+        <p style="color:#b10000;">Nie masz uprawnień do tworzenia nowych wpisów.</p>
+    <?php else: ?>
     <form method="post" class="add-form">
+        <p><strong>Numer inwentarzowy</strong> jest nadawany automatycznie przy zapisie.</p>
         
         <?php foreach ($valid_columns as $column): ?>
+            <?php if ($column === 'numer_ewidencyjny') { continue; } ?>
             
                 <label for="<?= $column ?>"><?= htmlspecialchars($column) ?></label>
                 <input type="text" name="<?= $column ?>" id="<?= $column ?>">
@@ -135,9 +183,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endforeach; ?>
         <input type="submit" name="add_karta" value="Zapisz">
     </form>
+    <?php endif; ?>
 
-    <div class="footer-right">
-        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2024
-    </div>
+    <?php include __DIR__ . '/footer.php'; ?>
 </body>
 </html>

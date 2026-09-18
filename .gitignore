@@ -1,0 +1,29 @@
+db_config.php
+*.sql.gz
+*.sql.bak
+.DS_Store
+gfx/*
+!gfx/.gitkeep
+gfx/thumbs/*
+!gfx/thumbs/.gitkeep
+uploads/*
+!uploads/.gitkeep
+tmp/*
+!tmp/.gitkeep
+tmp/cache/*
+output/*
+!output/.gitkeep
+output/backups/*
+cgi-bin/
+2/
+3/
+4/
+* copy.php
+* copy.css
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+.idea/
+.vscode/

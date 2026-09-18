@@ -1,10 +1,18 @@
 <?php
 session_start();
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
 error_reporting(E_ALL);
 
+if (!isset($_SESSION['user_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
 include 'db.php';
+require_once __DIR__ . '/museum_system.php';
+require_once __DIR__ . '/header.php';
 
 
 $collections = [
@@ -12,6 +20,7 @@ $collections = [
     'kolekcja-maszyn' => 'karta_ewidencyjna_maszyny',
     'kolekcja-matryc' => 'karta_ewidencyjna_matryce',
     'biblioteka' => 'karta_ewidencyjna_bib',
+    'kolekcja-klisz' => 'karta_ewidencyjna_klisze',
 ];
 
 $selectedCollection = $_GET['collection'] ?? ($_POST['collection'] ?? 'ksiazki-artystyczne');
@@ -44,7 +53,7 @@ $query_string = '';
 $has_search = false;
 $search_state_id = '';
 $showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
-$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 25;
 
 if (isset($_POST['show_thumbnail_column'])) {
     $showThumbnailColumn = $_POST['show_thumbnail_column'] === '1';
@@ -96,12 +105,8 @@ function buildThumbPath(string $encodedPath): string {
 }
 
 function buildImagePaths(?string $rawImageValue, string $collection): array {
-    if ($rawImageValue === null) {
-        return [null, null];
-    }
-
-    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
-    if ($normalizedImageValue === '') {
+    $normalizedImageValue = museumNormalizeImageReference($rawImageValue);
+    if ($normalizedImageValue === null) {
         return [null, null];
     }
 
@@ -142,6 +147,25 @@ function sqlFoldExpr($field) {
     }
     return $expr;
 }
+
+function fetchGlobalInventoryMatches(PDO $pdo, array $collections, string $queryString): array {
+    $needle = trim($queryString);
+    if ($needle === '') {
+        return [];
+    }
+
+    $results = [];
+    foreach ($collections as $collectionKey => $tableName) {
+        $stmt = $pdo->prepare("SELECT * FROM {$tableName} WHERE TRIM(CAST(numer_ewidencyjny AS CHAR)) = :inventory LIMIT 20");
+        $stmt->execute(['inventory' => $needle]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['__collection_key'] = $collectionKey;
+            $results[] = $row;
+        }
+    }
+
+    return $results;
+}
 if (!isset($_SESSION['search_states']) || !is_array($_SESSION['search_states'])) {
     $_SESSION['search_states'] = [];
 }
@@ -170,6 +194,7 @@ if (isset($_GET['state'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((string)$_POST['query']) !== '') {
     $query_string = trim($_POST['query'] ?? '');
     $has_search = true;
+    $inventoryLookupValue = museumNormalizeInventoryLookupValue($query_string);
 
     $q_like = normalizeForLike($query_string);
     $q_fold = normalizeSearchQuery($query_string);
@@ -196,7 +221,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     $where_clause = implode(' OR ', $where);
     $stmt = $pdo->prepare("SELECT * FROM {$mainTable} WHERE $where_clause LIMIT 100");
     $stmt->execute($params);
-    $search_results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $search_results = [];
+    $seen = [];
+
+    foreach (fetchGlobalInventoryMatches($pdo, $collections, $inventoryLookupValue) as $row) {
+        $rowCollection = (string)($row['__collection_key'] ?? $selectedCollection);
+        $idField = array_key_exists('ID', $row) ? 'ID' : (array_key_exists('id', $row) ? 'id' : null);
+        $rowId = $idField !== null ? (string)($row[$idField] ?? '') : '';
+        $dedupeKey = $rowCollection . ':' . $rowId;
+        if ($dedupeKey === ':' || isset($seen[$dedupeKey])) {
+            continue;
+        }
+        $seen[$dedupeKey] = true;
+        $search_results[] = $row;
+    }
+
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $row['__collection_key'] = $selectedCollection;
+        $idField = array_key_exists('ID', $row) ? 'ID' : (array_key_exists('id', $row) ? 'id' : null);
+        $rowId = $idField !== null ? (string)($row[$idField] ?? '') : '';
+        $dedupeKey = $selectedCollection . ':' . $rowId;
+        if ($dedupeKey === ':' || isset($seen[$dedupeKey])) {
+            continue;
+        }
+        $seen[$dedupeKey] = true;
+        $search_results[] = $row;
+    }
 
     $search_state_id = bin2hex(random_bytes(8));
     $_SESSION['search_states'][$search_state_id] = [
@@ -261,7 +311,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
         }
 
         function updateThumbnailSize(size) {
-            thumbnailSizePx = Math.max(25, Math.min(111, Number(size) || 90));
+            thumbnailSizePx = Math.max(25, Math.min(111, Number(size) || 25));
             document.documentElement.style.setProperty('--thumbnail-height', thumbnailSizePx + 'px');
 
             const slider = document.getElementById('thumbnailSizeSlider');
@@ -465,47 +515,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
     </script>
 </head>
 <body>
-    <div class="header">
-        <a href="https://baza.mkal.pl">
-            <img src="bazamka.png" width="400" alt="Logo bazy Muzeum Książki Artystycznej" class="logo">
-        </a>
+    <?php
+    renderAppHeader([
+        'selectedCollection' => $selectedCollection,
+        'collections' => $collections,
+        'lists' => $lists,
+        'username' => $_SESSION['username'] ?? '',
+        'logoHref' => 'index.php?collection=' . rawurlencode($selectedCollection),
+        'showColumnButton' => true,
+        'showBulkBar' => true,
+        'primaryActions' => [
+            ['label' => 'Powrót do strony głównej', 'href' => 'index.php?collection=' . rawurlencode($selectedCollection)],
+        ],
+    ]);
+    ?>
 
-        <div class="header-links">
-            <div class="header-low">
-            <?php foreach ($lists as $list): ?>
-                <a href="list_view.php?list_id=<?php echo $list['id']; ?>&collection=<?php echo urlencode($selectedCollection); ?>"><?php echo htmlspecialchars($list['list_name']); ?></a>
-            <?php endforeach; ?>
-</div>
-
-            <!-- Masowy dropdown do dodawania do listy oraz globalny zaznacz wszystko -->
-            <div class="bulk-bar">
-                <label for="bulkList" class="muted">Masowo dodaj do listy</label>
-                <select id="bulkList" onchange="handleBulkAdd(this)">
-                    <option value="">Wybierz</option>
-                    <option value="new">+ Nowa lista</option>
-                    <option disabled>──────────</option>
-                    <div class="header-low">
-                    <?php foreach ($lists as $list): ?>
-                        <option value="<?php echo $list['id']; ?>"><?php echo htmlspecialchars($list['list_name']); ?></option>
-                    <?php endforeach; ?>
-                </div>
-                </select>
-
-                <label style="display:inline-flex; align-items:center; gap:6px; margin-left:8px;">
-                    <input type="checkbox" id="selectAllBoth" onclick="selectAllBothTables(this)">
-                    Zaznacz wszystko
-                </label>
-
-                <span id="bulkCount" class="muted">Nic nie zaznaczono</span>
-            </div>
-        </div>
-    </div>
-
-    <a role="button" id="toggleButton" href="index.php?collection=<?php echo urlencode($selectedCollection); ?>">Powrót do strony głównej</a>
-    <br><br>
+    <br>
 
     <!-- Wybór kolumn -->
-    <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
     <form id="columnSelectorContainer" class="column-selector" method="post" action="" onsubmit="suppressUnloadWarning = true;">
         <input type="hidden" name="collection" value="<?php echo htmlspecialchars($selectedCollection); ?>">
         <input type="hidden" name="show_thumbnail_column" value="0">
@@ -541,9 +568,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
             <span id="thumbnailSizeValue"><?php echo (int)$thumbnailSize; ?>px</span>
         </label>
     </form>
-             <div class="footer-right">
-        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
-    </div>
+    <?php include __DIR__ . '/footer.php'; ?>
 
     <?php if ($has_search): ?>
         <div class="data-table exact">
@@ -561,6 +586,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                                     <?php echo htmlspecialchars($col); ?>
                                 </th>
                             <?php endforeach; ?>
+                            <th>Kolekcja</th>
                             <th>Opcje</th>
                         </tr>
                     </thead>
@@ -569,13 +595,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                             <?php
                                 $idField = isset($row['ID']) ? 'ID' : (isset($row['id']) ? 'id' : $columns[0]);
                                 $entryId = $row[$idField];
+                                $rowCollection = (string)($row['__collection_key'] ?? $selectedCollection);
                             ?>
                             <tr>
                                 <td>
-                                    <input type="checkbox" class="row-select" data-entry-id="<?php echo (int)$entryId; ?>" onclick="toggleRowSelection(this)">
+                                    <input type="checkbox" class="row-select" data-entry-id="<?php echo (int)$entryId; ?>" onclick="toggleRowSelection(this)" <?php echo $rowCollection === $selectedCollection ? '' : 'disabled'; ?>>
                                 </td>
                                 <td class="entry-thumbnail-cell thumbnail-col" style="display:<?php echo $showThumbnailColumn ? "" : "none"; ?>">
-                                    <?php [$thumbnailUrl, $thumbnailFallbackUrl] = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection); ?>
+                                    <?php [$thumbnailUrl, $thumbnailFallbackUrl] = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $rowCollection); ?>
                                     <?php if ($thumbnailUrl !== null): ?>
                                         <img class="entry-thumbnail" src="<?php echo htmlspecialchars($thumbnailUrl); ?>" alt="Miniatura wpisu"<?php if ($thumbnailFallbackUrl !== null): ?> onerror="if (this.src !== <?php echo json_encode($thumbnailFallbackUrl); ?>) this.src = <?php echo json_encode($thumbnailFallbackUrl); ?>;"<?php endif; ?>>
                                     <?php else: ?>
@@ -587,14 +614,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                                         <?php echo htmlspecialchars($row[$col] ?? ''); ?>
                                     </td>
                                 <?php endforeach; ?>
-                                <td class="no-highlight">
-                                    <?php
-                                        $kartaHref = 'karta.php?id=' . urlencode((string)$entryId) . '&collection=' . urlencode($selectedCollection);
+                                <?php
+                                        $kartaHref = 'karta.php?id=' . urlencode((string)$entryId) . '&collection=' . urlencode($rowCollection);
                                         if ($search_state_id !== '') {
                                             $kartaHref .= '&search_return=' . urlencode('search.php?state=' . $search_state_id);
                                         }
                                     ?>
+                                <td class="no-highlight"><?php echo htmlspecialchars($rowCollection); ?></td>
+                                <td class="no-highlight">
                                     <a role="button" id="toggleButton" href="<?php echo $kartaHref; ?>">Karta</a>
+                                    <?php if ($rowCollection === $selectedCollection): ?>
                                     <select onchange="handleListSelection(this, <?php echo (int)$entryId; ?>)">
                                         <option value="">Dodaj do listy</option>
                                         <option value="new">+ Nowa lista</option>
@@ -603,6 +632,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
                                             <option value="<?php echo $list['id']; ?>"><?php echo htmlspecialchars($list['list_name']); ?></option>
                                         <?php endforeach; ?>
                                     </select>
+                                    <?php else: ?>
+                                    <span style="margin-left:8px;opacity:.7;">Listy tylko w aktywnej kolekcji</span>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -613,9 +645,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['query']) && trim((str
             <?php endif; ?>
         </div>
 
-            <div class="footer-right">
-        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
-    </div>
+        <?php include __DIR__ . '/footer.php'; ?>
         <script>
             updateColumnDisplay();
             highlightQuery("<?php echo htmlspecialchars($query_string); ?>");

@@ -1,7 +1,8 @@
 <?php
 session_start();
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
 error_reporting(E_ALL);
 
 if (!isset($_SESSION['user_id'])) {
@@ -10,9 +11,56 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $username = $_SESSION['username'] ?? '';
+$canFullDatabaseView = !empty($_SESSION['can_full_database_view']) || !empty($_SESSION['is_root']);
+
+// Zsynchronizuj wybór księgi przed cache HIT. Inaczej przy cache trafieniu db.php się nie wykona
+// i sesja może zostać na poprzedniej księdze.
+$requestedLedgerForSession = isset($_GET['ledger']) ? (string)$_GET['ledger'] : '';
+if ($requestedLedgerForSession !== '' && preg_match('/^[a-z0-9_-]{1,64}$/i', $requestedLedgerForSession) === 1) {
+    $_SESSION['selected_ledger'] = strtolower($requestedLedgerForSession);
+}
+
+$isIndexPageRequest = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && !isset($_GET['action']);
+$indexCacheFile = null;
+$indexCacheTtlSeconds = 30;
+
+if ($isIndexPageRequest) {
+    $indexCacheDir = __DIR__ . '/tmp/cache';
+    $cacheKeyPayload = [
+        'route' => 'index',
+        'user' => (int)($_SESSION['user_id'] ?? 0),
+        'collection' => (string)($_GET['collection'] ?? 'ksiazki-artystyczne'),
+        'ledger' => (string)($_GET['ledger'] ?? ($_SESSION['selected_ledger'] ?? 'depozytowa')),
+        'visible_columns' => isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
+            ? array_values($_SESSION['visible_columns'])
+            : [],
+        'show_thumbnail_column' => isset($_SESSION['show_thumbnail_column']) ? (bool)$_SESSION['show_thumbnail_column'] : true,
+        'thumbnail_size' => isset($_SESSION['thumbnail_size']) ? (int)$_SESSION['thumbnail_size'] : 25,
+    ];
+    $cacheKeyJson = json_encode($cacheKeyPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($cacheKeyJson === false) {
+        $cacheKeyJson = serialize($cacheKeyPayload);
+    }
+    $indexCacheFile = $indexCacheDir . '/index_' . hash('sha256', $cacheKeyJson) . '.html';
+
+    if (is_file($indexCacheFile) && (time() - (int)filemtime($indexCacheFile)) <= $indexCacheTtlSeconds) {
+        header('Cache-Control: private, max-age=' . $indexCacheTtlSeconds);
+        header('Vary: Cookie');
+        header('X-Index-Cache: HIT');
+        readfile($indexCacheFile);
+        exit;
+    }
+
+    if (!is_dir($indexCacheDir)) {
+        @mkdir($indexCacheDir, 0775, true);
+    }
+    ob_start();
+}
 
 
 include 'db.php';
+require_once __DIR__ . '/museum_system.php';
+require_once __DIR__ . '/header.php';
 
 function ensureListsCollectionColumn(PDO $pdo): void {
     $columns = $pdo->query("SHOW COLUMNS FROM lists")->fetchAll(PDO::FETCH_COLUMN, 0);
@@ -48,6 +96,12 @@ $collections = [
         'log' => 'karta_ewidencyjna_bib_log',
         'moves' => 'karta_ewidencyjna_bib_przemieszczenia',
     ],
+    'kolekcja-klisz' => [
+        'label' => 'Klisze drukarskie',
+        'main' => 'karta_ewidencyjna_klisze',
+        'log' => 'karta_ewidencyjna_klisze_log',
+        'moves' => 'karta_ewidencyjna_klisze_przemieszczenia',
+    ],
 ];
 
 $selectedCollection = $_GET['collection'] ?? 'ksiazki-artystyczne';
@@ -62,12 +116,8 @@ function buildThumbPath(string $encodedPath): string {
 }
 
 function buildImagePaths(?string $rawImageValue, string $collection): array {
-    if ($rawImageValue === null) {
-        return [null, null];
-    }
-
-    $normalizedImageValue = trim(trim($rawImageValue), " '\"");
-    if ($normalizedImageValue === '') {
+    $normalizedImageValue = museumNormalizeImageReference($rawImageValue);
+    if ($normalizedImageValue === null) {
         return [null, null];
     }
 
@@ -132,12 +182,21 @@ if (isset($_GET['action']) && $_GET['action'] === 'fetch_rows') {
         $stmt = $pdo->query($selectSql);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        $allowedPreviewColumns = ['ID', 'nazwa_tytul', 'autor_wytworca', 'dokumentacja_wizualna'];
         foreach ($rows as &$row) {
+            if (!$canFullDatabaseView) {
+                $row = array_intersect_key($row, array_flip($allowedPreviewColumns));
+            }
             $thumbnailPaths = buildImagePaths($row['dokumentacja_wizualna'] ?? null, $selectedCollection);
             $row['__thumbnail_url'] = $thumbnailPaths[0];
             $row['__thumbnail_fallback_url'] = $thumbnailPaths[1];
+            $row['__can_full_view'] = $canFullDatabaseView ? 1 : 0;
         }
         unset($row);
+
+        if (!$canFullDatabaseView) {
+            $columns = array_values(array_intersect($columns, ['nazwa_tytul', 'autor_wytworca']));
+        }
 
         header('Content-Type: application/json');
         echo json_encode([
@@ -168,7 +227,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
     $data = json_decode($rawInput, true);
     $requested = (isset($data['visible_columns']) && is_array($data['visible_columns'])) ? $data['visible_columns'] : [];
     $showThumbnailColumn = isset($data['show_thumbnail_column']) ? (bool)$data['show_thumbnail_column'] : true;
-    $thumbnailSize = isset($data['thumbnail_size']) ? (int)$data['thumbnail_size'] : 90;
+    $thumbnailSize = isset($data['thumbnail_size']) ? (int)$data['thumbnail_size'] : 25;
     $thumbnailSize = max(25, min(111, $thumbnailSize));
 
     $columns = [];
@@ -177,6 +236,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'save_visible_columns') {
         $columns[] = $row['Field'];
     }
 
+    if (!$canFullDatabaseView) {
+        $requested = array_values(array_intersect($requested, ['nazwa_tytul', 'autor_wytworca']));
+        $showThumbnailColumn = true;
+    }
     $selectedColumns = array_values(array_intersect($columns, $requested));
     $_SESSION['visible_columns'] = $selectedColumns;
     $_SESSION['show_thumbnail_column'] = $showThumbnailColumn;
@@ -199,12 +262,18 @@ $listStmt->execute([$selectedCollection]);
 $lists = $listStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Domyślne kolumny (wspólne ustawienie między podstronami)
-$defaultVisibleColumns = ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca'];
+$defaultVisibleColumns = $canFullDatabaseView
+    ? ['numer_ewidencyjny', 'nazwa_tytul', 'autor_wytworca']
+    : ['nazwa_tytul', 'autor_wytworca'];
 $selectedColumns = isset($_SESSION['visible_columns']) && is_array($_SESSION['visible_columns'])
     ? array_values(array_intersect($columns, $_SESSION['visible_columns']))
     : $defaultVisibleColumns;
+$selectedColumns = $canFullDatabaseView
+    ? $selectedColumns
+    : array_values(array_intersect($selectedColumns, ['nazwa_tytul', 'autor_wytworca']));
 $showThumbnailColumn = $_SESSION['show_thumbnail_column'] ?? true;
-$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 90;
+$showThumbnailColumn = $canFullDatabaseView ? $showThumbnailColumn : true;
+$thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SESSION['thumbnail_size'])) : 25;
 ?>
 <!DOCTYPE html>
 <html lang="pl">
@@ -215,49 +284,22 @@ $thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SE
     <style>:root { --thumbnail-height: <?php echo (int)$thumbnailSize; ?>px; }</style>
 </head>
 <body>
-    <div class="header">
-        <a href="https://baza.mkal.pl">
-            <img src="bazamka.png" width="400" alt="Logo bazy Muzeum Książki Artystycznej" class="logo">
-        </a>
-
-        <div class="header-links">
-
-             <div class="collection-switcher">
-        <strong>Kolekcje:</strong>
-        <?php foreach ($collections as $collectionKey => $collection): ?>
-            <a role="button" id="toggleButton" href="?collection=<?php echo urlencode($collectionKey); ?>" class="<?php echo $selectedCollection === $collectionKey ? 'active' : ''; ?>">
-                <?php echo htmlspecialchars($collection['label']); ?>
-            </a>
-        <?php endforeach; ?>
-    </div>    
-
- 
-
-<div class="header-low">
-    <a role="button" id="toggleButton" href="lists.php?collection=<?php echo urlencode($selectedCollection); ?>">Edytor list</a>
-<strong>Listy:</strong>
-            <?php
-            foreach ($lists as $list) {
-                echo "<a href='list_view.php?list_id={$list['id']}&collection=" . urlencode($selectedCollection) . "'>{$list['list_name']}</a> &nbsp; ";
-            }
-            ?>
-
-</div>
-
-<a role="button" href="logout.php" class="back-link" id="toggleButton">Wyloguj się <?php echo htmlspecialchars($username); ?></a>
-<a role="button" href="project_info.php" id="toggleButton" title="Informacje o projekcie">?!</a>
-        </div>
-    </div>
-<div class="header-links-left">
-
-
-    <button id="toggleColumndButton" onclick="toggleColumnSelector()">Wybierz kolumny</button>
-    
-    <a role="button" id="toggleButton" href="neww.php?collection=<?php echo urlencode($selectedCollection); ?>">Nowy Wpis</a> 
-    <a role="button" id="toggleButton" href="mobile_add.php?collection=<?php echo urlencode($selectedCollection); ?>">Fast Mobile Adder</a> 
-    <a role="button" id="toggleButton" href="search.php?collection=<?php echo urlencode($selectedCollection); ?>">Szukaj</a>
-   
- </div>
+    <?php
+    renderAppHeader([
+        'selectedCollection' => $selectedCollection,
+        'collections' => $collections,
+        'lists' => $lists,
+        'username' => $username,
+        'logoHref' => 'index.php?collection=' . rawurlencode($selectedCollection),
+        'showColumnButton' => true,
+        'showBulkBar' => true,
+        'primaryActions' => [
+            ['label' => 'Nowy Wpis', 'href' => 'neww.php?collection=' . rawurlencode($selectedCollection)],
+            ['label' => 'Fast Mobile Adder', 'href' => 'mobile_add.php?collection=' . rawurlencode($selectedCollection)],
+            ['label' => 'Szukaj', 'href' => 'search.php?collection=' . rawurlencode($selectedCollection)],
+        ],
+    ]);
+    ?>
     <div id="columnSelectorContainer" class="column-selector">
         <label class="thumbnail-size-control" for="thumbnailSizeSlider">
             Rozmiar miniatury
@@ -282,6 +324,9 @@ $thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SE
         <table id="dataTable">
             <thead>
                 <tr>
+                    <th style="width:36px;">
+                        <input type="checkbox" class="select-all" onclick="selectAllInTable(this, '#dataTable')">
+                    </th>
                     <th id="thumbnailHeader" class="thumbnail-col" style="display: <?php echo $showThumbnailColumn ? "" : "none"; ?>;">Miniatura foto</th>
                     <?php foreach ($columns as $col): ?>
                         <th class="<?php echo $col; ?>" 
@@ -296,19 +341,58 @@ $thumbnailSize = isset($_SESSION['thumbnail_size']) ? max(25, min(111, (int)$_SE
             </tbody>
         </table>
     </div>
-    <div class="footer-right">
-        Muzeum Książki Artystycznej w Łodzi &reg; All Rights Reserved. &nbsp; &nbsp; &copy; by <a href="https://peterwolf.pl/" target="_blank">peterwolf.pl</a> 2026
-    </div>
+    <?php
+    $footerShowThemeToggle = true;
+    $footerShowLoadCacheButton = true;
+    $footerShowInfoButton = true;
+    include __DIR__ . '/footer.php';
+    ?>
 <script>
 // przekazanie PHP -> JS dla opcji list
 const phpLists = <?php echo json_encode($lists); ?>;
 const selectedCollection = <?php echo json_encode($selectedCollection); ?>;
+const canFullDatabaseView = <?php echo json_encode((bool)$canFullDatabaseView); ?>;
+const canEditLists = <?php echo json_encode((bool)(!empty($_SESSION['can_edit_lists']) || !empty($_SESSION['is_root']))); ?>;
 
 // Kolumny widoczne na start
 const defaultVisibleColumns = <?php echo json_encode($selectedColumns); ?>;
 let showThumbnailColumn = <?php echo json_encode((bool)$showThumbnailColumn); ?>;
 let thumbnailSizePx = <?php echo (int)$thumbnailSize; ?>;
 let saveColumnsTimeout = null;
+const selectedIds = new Set();
+const THEME_STORAGE_KEY = 'index-theme-override';
+
+function applyThemeOverride(theme) {
+    const root = document.documentElement;
+    const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
+    root.classList.remove('theme-light', 'theme-dark');
+    root.classList.add(`theme-${normalizedTheme}`);
+    root.style.colorScheme = normalizedTheme;
+    const button = document.getElementById('themeToggleButton');
+    if (button) {
+        button.title = normalizedTheme === 'dark'
+            ? 'Aktywny tryb: ciemny. Kliknij, aby przełączyć na jasny.'
+            : 'Aktywny tryb: jasny. Kliknij, aby przełączyć na ciemny.';
+    }
+}
+
+function initializeThemeOverride() {
+    const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+    if (storedTheme === 'light' || storedTheme === 'dark') {
+        applyThemeOverride(storedTheme);
+        return;
+    }
+
+    const systemPrefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyThemeOverride(systemPrefersDark ? 'dark' : 'light');
+}
+
+function toggleThemeOverride() {
+    const root = document.documentElement;
+    const nextTheme = root.classList.contains('theme-dark') ? 'light' : 'dark';
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    applyThemeOverride(nextTheme);
+}
 
 function toggleColumnSelector() {
     const container = document.getElementById('columnSelectorContainer');
@@ -336,7 +420,7 @@ function persistVisibleColumns() {
 }
 
 function updateThumbnailSize(size) {
-    thumbnailSizePx = Math.max(25, Math.min(111, Number(size) || 90));
+    thumbnailSizePx = Math.max(25, Math.min(111, Number(size) || 25));
     document.documentElement.style.setProperty('--thumbnail-height', thumbnailSizePx + 'px');
 
     const slider = document.getElementById('thumbnailSizeSlider');
@@ -439,11 +523,193 @@ function handleListSelection(select, entryId) {
     }
 }
 
+function toggleRowSelection(cb) {
+    const id = cb.dataset.entryId;
+    if (!id) return;
+    if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
+    updateBulkUi();
+    syncSelectAllStates();
+}
+
+function selectAllInTable(sourceCb, tableSelector) {
+    const checks = document.querySelectorAll(`${tableSelector} tbody input.row-select[type="checkbox"]`);
+    checks.forEach(cb => {
+        cb.checked = sourceCb.checked;
+        if (sourceCb.checked) selectedIds.add(cb.dataset.entryId);
+        else selectedIds.delete(cb.dataset.entryId);
+    });
+    updateBulkUi();
+    syncSelectAllStates();
+}
+
+function selectAllBothTables(masterCb) {
+    const allChecks = document.querySelectorAll('table tbody input.row-select[type="checkbox"]');
+    allChecks.forEach(cb => {
+        cb.checked = masterCb.checked;
+        if (masterCb.checked) selectedIds.add(cb.dataset.entryId);
+        else selectedIds.delete(cb.dataset.entryId);
+    });
+    document.querySelectorAll('input.select-all[type="checkbox"]').forEach(cb => cb.checked = masterCb.checked);
+    updateBulkUi();
+}
+
+function syncSelectAllStates() {
+    const tableChecks = document.querySelectorAll('#dataTable tbody input.row-select[type="checkbox"]');
+    const tableAll = document.querySelector('#dataTable thead input.select-all');
+    const masterAll = document.getElementById('selectAllBoth');
+    const allChecked = tableChecks.length > 0 && Array.from(tableChecks).every(cb => cb.checked);
+    if (tableAll) tableAll.checked = allChecked;
+    if (masterAll) masterAll.checked = allChecked;
+}
+
+function getSelectedIds() {
+    return Array.from(selectedIds);
+}
+
+function clearSelections() {
+    selectedIds.clear();
+    document.querySelectorAll('input.row-select[type="checkbox"]').forEach(cb => cb.checked = false);
+    document.querySelectorAll('input.select-all[type="checkbox"]').forEach(cb => cb.checked = false);
+    const masterAll = document.getElementById('selectAllBoth');
+    if (masterAll) masterAll.checked = false;
+    updateBulkUi();
+}
+
+function updateBulkUi() {
+    const info = document.getElementById('bulkCount');
+    if (!info) return;
+    const count = selectedIds.size;
+    info.textContent = count === 0 ? 'Nic nie zaznaczono' : `Zaznaczono: ${count}`;
+}
+
+async function handleBulkAdd(selectEl) {
+    const listId = selectEl.value;
+    if (!listId) return;
+
+    const ids = getSelectedIds();
+    if (ids.length === 0) {
+        alert('Najpierw zaznacz rekordy.');
+        selectEl.value = '';
+        return;
+    }
+
+    if (listId === 'new') {
+        const name = prompt('Podaj nazwę nowej listy:');
+        if (!name) {
+            selectEl.value = '';
+            return;
+        }
+
+        const firstId = Number.parseInt(ids[0], 10);
+        const resp = await fetch('add_list.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, entry_id: firstId, collection: selectedCollection })
+        });
+        const data = await resp.json();
+        if (!data.success || !data.list_id) {
+            alert('Nie udało się utworzyć listy: ' + (data.message || 'nieznany błąd'));
+            selectEl.value = '';
+            return;
+        }
+
+        const newListId = data.list_id;
+        for (let i = 1; i < ids.length; i += 1) {
+            await fetch('add_to_list.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ list_id: newListId, entry_id: Number.parseInt(ids[i], 10), collection: selectedCollection })
+            });
+        }
+        alert(`Utworzono listę i dodano ${ids.length} rekordów.`);
+        clearSelections();
+        location.reload();
+        return;
+    }
+
+    let ok = 0;
+    for (const id of ids) {
+        const resp = await fetch('add_to_list.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ list_id: listId, entry_id: Number.parseInt(id, 10), collection: selectedCollection })
+        });
+        const data = await resp.json();
+        if (data.success) ok += 1;
+    }
+    alert(`Dodano ${ok}/${ids.length} rekordów do listy.`);
+    clearSelections();
+    selectEl.value = '';
+}
+
 // Infinite scroll
 let offset = 0;
 const limit = 20;
 let loading = false;
 let noMoreRows = false;
+let loadAndCacheIntervalId = null;
+let loadAndCacheInProgress = false;
+let loadAndCacheLastOffset = 0;
+let loadAndCacheStallCount = 0;
+
+function getLoadCacheButton() {
+    return document.getElementById('loadCacheButton');
+}
+
+function updateLoadCacheButton(text, disabled) {
+    const button = getLoadCacheButton();
+    if (!button) return;
+    button.textContent = text;
+    button.disabled = disabled;
+}
+
+function stopLoadAndCache(markAsDone = false) {
+    if (loadAndCacheIntervalId !== null) {
+        window.clearInterval(loadAndCacheIntervalId);
+        loadAndCacheIntervalId = null;
+    }
+    loadAndCacheInProgress = false;
+    updateLoadCacheButton(markAsDone ? 'Cached' : 'Load&Cache', false);
+}
+
+function startLoadAndCache() {
+    if (loadAndCacheInProgress) return;
+    if (noMoreRows) {
+        updateLoadCacheButton('Cached', false);
+        return;
+    }
+
+    loadAndCacheInProgress = true;
+    loadAndCacheLastOffset = offset;
+    loadAndCacheStallCount = 0;
+    updateLoadCacheButton('Ładowanie...', true);
+    loadRows();
+
+    loadAndCacheIntervalId = window.setInterval(() => {
+        if (noMoreRows) {
+            stopLoadAndCache(true);
+            return;
+        }
+
+        if (loading) {
+            return;
+        }
+
+        if (offset === loadAndCacheLastOffset) {
+            loadAndCacheStallCount += 1;
+            if (loadAndCacheStallCount >= 5) {
+                stopLoadAndCache(false);
+                return;
+            }
+        } else {
+            loadAndCacheLastOffset = offset;
+            loadAndCacheStallCount = 0;
+        }
+
+        updateLoadCacheButton(`Ładowanie (${offset})`, true);
+        loadRows();
+    }, 250);
+}
 
 // Generuj <option> list na podstawie phpLists
 function getListOptionsHtml() {
@@ -515,6 +781,29 @@ function loadRows() {
 
             rows.forEach(row => {
                 const tr = document.createElement('tr');
+                const rowId = getRowId(row, columns, primaryKeyColumn);
+                const hasValidRowId = Number.isInteger(rowId) && rowId > 0;
+                const entryIdForHandlers = hasValidRowId ? rowId : 0;
+                const rowHasFullView = !!Number(row.__can_full_view || 0);
+                const kartaHref = hasValidRowId && rowHasFullView
+                    ? `karta.php?id=${rowId}&collection=${encodeURIComponent(selectedCollection)}`
+                    : '#';
+
+                const tdSelect = document.createElement('td');
+                if (hasValidRowId) {
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.className = 'row-select';
+                    cb.dataset.entryId = String(rowId);
+                    cb.onclick = () => toggleRowSelection(cb);
+                    if (selectedIds.has(String(rowId))) {
+                        cb.checked = true;
+                    }
+                    tdSelect.appendChild(cb);
+                } else {
+                    tdSelect.textContent = '—';
+                }
+                tr.appendChild(tdSelect);
 
                 const tdThumbnail = document.createElement('td');
                 tdThumbnail.classList.add('entry-thumbnail-cell', 'thumbnail-col');
@@ -531,7 +820,15 @@ function loadRows() {
                             }
                         };
                     }
-                    tdThumbnail.appendChild(img);
+                    if (hasValidRowId && rowHasFullView) {
+                        const thumbLink = document.createElement('a');
+                        thumbLink.href = kartaHref;
+                        thumbLink.title = 'Otwórz kartę wpisu';
+                        thumbLink.appendChild(img);
+                        tdThumbnail.appendChild(thumbLink);
+                    } else {
+                        tdThumbnail.appendChild(img);
+                    }
                 } else {
                     tdThumbnail.textContent = '—';
                 }
@@ -550,17 +847,9 @@ function loadRows() {
                 // Opcje
                 const tdOptions = document.createElement('td');
                 tdOptions.width = "222";
-                const rowId = getRowId(row, columns, primaryKeyColumn);
-                const hasValidRowId = Number.isInteger(rowId) && rowId > 0;
-                const entryIdForHandlers = hasValidRowId ? rowId : 0;
-                const kartaHref = hasValidRowId
-                    ? `karta.php?id=${rowId}&collection=${encodeURIComponent(selectedCollection)}`
-                    : '#';
                 tdOptions.innerHTML = `
-                    <a role="button" id="toggleButton" href="${kartaHref}">Karta</a>
-                    <select onchange="handleListSelection(this, ${entryIdForHandlers})">
-                        ${getListOptionsHtml()}
-                    </select>
+                    ${rowHasFullView && hasValidRowId ? `<a role="button" id="toggleButton" href="${kartaHref}">Karta</a>` : `<span class="muted">Podgląd ograniczony</span>`}
+                    ${canEditLists ? `<select onchange="handleListSelection(this, ${entryIdForHandlers})">${getListOptionsHtml()}</select>` : ''}
                 `;
                 tr.appendChild(tdOptions);
 
@@ -568,6 +857,11 @@ function loadRows() {
             });
 
             offset += rows.length;
+            if (typeof window.resortSortableTableById === 'function') {
+                window.resortSortableTableById('dataTable');
+            }
+            updateBulkUi();
+            syncSelectAllStates();
             loading = false;
         })
         .catch(e => {
@@ -578,6 +872,8 @@ function loadRows() {
 
 toggleThumbnailColumn();
 updateThumbnailSize(thumbnailSizePx);
+initializeThemeOverride();
+updateBulkUi();
 
 // Ładowanie początkowe
 loadRows();
@@ -593,3 +889,15 @@ window.addEventListener('scroll', function() {
 </script>
 </body>
 </html>
+<?php
+if ($isIndexPageRequest) {
+    $pageContent = ob_get_contents();
+    header('Cache-Control: private, max-age=' . $indexCacheTtlSeconds);
+    header('Vary: Cookie');
+    header('X-Index-Cache: MISS');
+    if ($pageContent !== false && $indexCacheFile !== null && is_dir(dirname($indexCacheFile))) {
+        @file_put_contents($indexCacheFile, $pageContent, LOCK_EX);
+    }
+    ob_end_flush();
+}
+?>

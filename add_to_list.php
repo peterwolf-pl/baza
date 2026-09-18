@@ -9,7 +9,7 @@ try {
     $list_id = isset($input['list_id']) ? (int)$input['list_id'] : 0;
     $entry_id = isset($input['entry_id']) ? (int)$input['entry_id'] : 0;
     $collection = $input['collection'] ?? 'ksiazki-artystyczne';
-    $allowedCollections = ['ksiazki-artystyczne', 'kolekcja-maszyn', 'kolekcja-matryc', 'biblioteka'];
+    $allowedCollections = ['ksiazki-artystyczne', 'kolekcja-maszyn', 'kolekcja-matryc', 'biblioteka', 'kolekcja-klisz'];
 
     if (!in_array($collection, $allowedCollections, true)) {
         $collection = 'ksiazki-artystyczne';
@@ -22,6 +22,10 @@ try {
 
     if (!isset($_SESSION['user_id'])) {
         echo json_encode(['success' => false, 'message' => 'Brak uprawnień.']);
+        exit;
+    }
+    if (empty($_SESSION['can_edit_lists']) && empty($_SESSION['is_root'])) {
+        echo json_encode(['success' => false, 'message' => 'Brak uprawnień do edycji list.']);
         exit;
     }
 
@@ -49,5 +53,6 @@ try {
 
     echo json_encode(['success' => $success]);
 } catch (Exception $e) {
-    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    error_log('add_to_list.php: ' . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Nie udało się dodać wpisu do listy.']);
 }
